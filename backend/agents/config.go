@@ -1,5 +1,7 @@
 package agents
 
+import "os"
+
 // QueryConfig is an immutable snapshot of environment and feature gates
 // taken at the start of each query loop iteration. Corresponds to
 // TypeScript's buildQueryConfig() in query/config.ts.
@@ -14,12 +16,15 @@ type QueryConfig struct {
 // QueryGates holds boolean feature flags for the query loop.
 // These are snapshotted once at query start to ensure consistent behavior.
 type QueryGates struct {
-	FastModeEnabled      bool
-	EmitToolUseSummaries bool
-	HistorySnip          bool
-	ContextCollapse      bool
-	TokenBudget          bool
-	CachedMicrocompact   bool
+	FastModeEnabled        bool
+	EmitToolUseSummaries   bool
+	HistorySnip            bool
+	ContextCollapse        bool
+	TokenBudget            bool
+	CachedMicrocompact     bool
+	StreamingToolExecution bool
+	ReactiveCompact        bool
+	IsAnt                  bool
 }
 
 // BuildQueryConfig creates a new immutable QueryConfig snapshot.
@@ -30,4 +35,39 @@ func BuildQueryConfig(sessionID string, gates QueryGates) QueryConfig {
 		SessionID: sessionID,
 		Gates:     gates,
 	}
+}
+
+// BuildQueryConfigFromEngine derives a QueryConfig from an EngineConfig,
+// applying environment variable overrides where applicable.
+func BuildQueryConfigFromEngine(sessionID string, cfg EngineConfig) QueryConfig {
+	gates := QueryGates{
+		FastModeEnabled:        !isEnvTruthy(os.Getenv("CLAUDE_CODE_DISABLE_FAST_MODE")),
+		EmitToolUseSummaries:   isEnvTruthy(os.Getenv("CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES")),
+		HistorySnip:            true,
+		ContextCollapse:        false, // opt-in
+		TokenBudget:            cfg.TaskBudget != nil,
+		CachedMicrocompact:     false, // opt-in
+		StreamingToolExecution: true,  // default on
+		ReactiveCompact:        true,  // default on
+		IsAnt:                  isEnvTruthy(os.Getenv("USER_TYPE_ANT")),
+	}
+
+	// Allow env overrides
+	if isEnvTruthy(os.Getenv("CLAUDE_CODE_DISABLE_STREAMING_TOOL_EXECUTION")) {
+		gates.StreamingToolExecution = false
+	}
+	if isEnvTruthy(os.Getenv("DISABLE_AUTO_COMPACT")) {
+		gates.ReactiveCompact = false
+	}
+
+	return BuildQueryConfig(sessionID, gates)
+}
+
+// isEnvTruthy returns true if the value is "1", "true", or "yes" (case-insensitive).
+func isEnvTruthy(val string) bool {
+	switch val {
+	case "1", "true", "TRUE", "yes", "YES":
+		return true
+	}
+	return false
 }

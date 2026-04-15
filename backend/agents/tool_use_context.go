@@ -7,13 +7,13 @@ import (
 
 // ToolPermissionContext holds the current permission configuration.
 type ToolPermissionContext struct {
-	Mode                          string                        `json:"mode"`
-	AdditionalWorkingDirectories  map[string]string             `json:"additional_working_directories,omitempty"`
-	AlwaysAllowRules              map[string][]PermissionRule   `json:"always_allow_rules,omitempty"`
-	AlwaysDenyRules               map[string][]PermissionRule   `json:"always_deny_rules,omitempty"`
-	AlwaysAskRules                map[string][]PermissionRule   `json:"always_ask_rules,omitempty"`
-	IsBypassPermissionsModeAvailable bool                       `json:"is_bypass_permissions_mode_available"`
-	ShouldAvoidPermissionPrompts  bool                          `json:"should_avoid_permission_prompts,omitempty"`
+	Mode                             string                      `json:"mode"`
+	AdditionalWorkingDirectories     map[string]string           `json:"additional_working_directories,omitempty"`
+	AlwaysAllowRules                 map[string][]PermissionRule `json:"always_allow_rules,omitempty"`
+	AlwaysDenyRules                  map[string][]PermissionRule `json:"always_deny_rules,omitempty"`
+	AlwaysAskRules                   map[string][]PermissionRule `json:"always_ask_rules,omitempty"`
+	IsBypassPermissionsModeAvailable bool                        `json:"is_bypass_permissions_mode_available"`
+	ShouldAvoidPermissionPrompts     bool                        `json:"should_avoid_permission_prompts,omitempty"`
 }
 
 // PermissionRule defines a single permission matching rule.
@@ -53,25 +53,37 @@ type ToolUseContext struct {
 	// QueryTracking tracks the chain of queries for analytics.
 	QueryTracking *QueryChainTracking
 
+	// AddNotification sends a notification to the UI (maps to TS addNotification).
+	AddNotification func(text string)
+
+	// HandleElicitation processes model elicitation requests.
+	HandleElicitation func(prompt string) (string, error)
+
+	// SetResponseLength callback for tracking response length.
+	SetResponseLength func(length int)
+
 	// InProgressToolUseIDs tracks currently executing tool IDs.
-	inProgressMu        sync.Mutex
+	inProgressMu         sync.Mutex
 	inProgressToolUseIDs map[string]struct{}
 }
 
 // ToolUseOptions holds engine-level configuration accessible during tool execution.
 type ToolUseOptions struct {
-	Commands              []interface{}
-	Debug                 bool
-	MainLoopModel         string
-	Tools                 []interface{} // will be refined to tool.Tool
-	Verbose               bool
-	ThinkingConfig        *ThinkingConfig
+	Commands                []interface{}
+	Debug                   bool
+	MainLoopModel           string
+	Tools                   []interface{} // will be refined to tool.Tool
+	Verbose                 bool
+	ThinkingConfig          *ThinkingConfig
 	IsNonInteractiveSession bool
-	MaxBudgetUSD          float64
-	CustomSystemPrompt    string
-	AppendSystemPrompt    string
-	QuerySource           string
-	RefreshTools          func() []interface{}
+	MaxBudgetUSD            float64
+	CustomSystemPrompt      string
+	AppendSystemPrompt      string
+	QuerySource             string
+	RefreshTools            func() []interface{}
+	AgentDefinitions        *AgentDefinitions
+	McpClients              []MCPClient
+	Theme                   string
 }
 
 // SetInProgressToolUseIDs safely updates the in-progress tool use set.
@@ -149,7 +161,56 @@ func (c *FileStateCache) Has(path string) bool {
 // AppState is the simplified application state (replaces React AppState).
 type AppState struct {
 	ToolPermissionContext ToolPermissionContext `json:"tool_permission_context"`
-	FastMode             bool                  `json:"fast_mode"`
-	EffortValue          string                `json:"effort_value,omitempty"`
-	AdvisorModel         string                `json:"advisor_model,omitempty"`
+	FastMode              bool                  `json:"fast_mode"`
+	EffortValue           string                `json:"effort_value,omitempty"`
+	AdvisorModel          string                `json:"advisor_model,omitempty"`
+	MCP                   MCPState              `json:"mcp"`
+	FileHistory           FileHistoryState      `json:"file_history,omitempty"`
+}
+
+// MCPState holds MCP (Model Context Protocol) server state.
+type MCPState struct {
+	Clients []MCPClient `json:"clients,omitempty"`
+	Tools   []MCPTool   `json:"tools,omitempty"`
+}
+
+// MCPClient represents a connected MCP server.
+type MCPClient struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"` // "connected" | "pending" | "error"
+	Status string `json:"status,omitempty"`
+}
+
+// MCPTool represents a tool provided by an MCP server.
+type MCPTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	ServerName  string `json:"server_name"`
+}
+
+// FileHistoryState tracks file modification history for undo/redo.
+type FileHistoryState struct {
+	Snapshots map[string][]FileSnapshot `json:"snapshots,omitempty"`
+}
+
+// FileSnapshot records a single file state at a point in time.
+type FileSnapshot struct {
+	Path        string `json:"path"`
+	Content     string `json:"content"`
+	Timestamp   int64  `json:"timestamp"`
+	MessageUUID string `json:"message_uuid,omitempty"`
+}
+
+// AgentDefinitions holds active and allowed agent types.
+type AgentDefinitions struct {
+	ActiveAgents      []AgentDef `json:"active_agents,omitempty"`
+	AllAgents         []AgentDef `json:"all_agents,omitempty"`
+	AllowedAgentTypes []string   `json:"allowed_agent_types,omitempty"`
+}
+
+// AgentDef represents a single agent definition.
+type AgentDef struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
 }

@@ -11,16 +11,20 @@ import (
 // ---------------------------------------------------------------------------
 // SystemPromptBuilder — 6-layer system prompt construction
 // Maps to TypeScript utils/systemPrompt.ts + prompt/system.go from the plan
+//
+// For the full prompt system (with all sections from constants/prompts.ts),
+// use BuildFullSystemPrompt() below. This builder is the legacy/simple path.
 // ---------------------------------------------------------------------------
 
 // SystemPromptBuilder constructs the multi-layer system prompt.
 // Layers (ordered for prompt cache stability):
-//   [1] Base prompt (most stable, highest cache hit)
-//   [2] Tool descriptions (changes when tools change)
-//   [3] Memories (CLAUDE.md content)
-//   [4] Environment context (dynamic: OS, time, cwd, git)
-//   [5] Custom system prompt (user-provided)
-//   [6] Append system prompt (additional instructions)
+//
+//	[1] Base prompt (most stable, highest cache hit)
+//	[2] Tool descriptions (changes when tools change)
+//	[3] Memories (CLAUDE.md content)
+//	[4] Environment context (dynamic: OS, time, cwd, git)
+//	[5] Custom system prompt (user-provided)
+//	[6] Append system prompt (additional instructions)
 type SystemPromptBuilder struct {
 	basePrompt       string
 	toolDescriptions string
@@ -151,4 +155,83 @@ func BuildToolDescriptions(toolPrompts []string) string {
 		sb.WriteString("\n\n")
 	}
 	return sb.String()
+}
+
+// ---------------------------------------------------------------------------
+// Full System Prompt — integrates all modules from constants/prompts.ts
+// ---------------------------------------------------------------------------
+
+// FullBuildConfig combines all parameters needed to construct the complete
+// system prompt equivalent to the TypeScript getSystemPrompt() + context.
+type FullBuildConfig struct {
+	// PromptConfig for GetSystemPrompt (all sections).
+	PromptConfig GetSystemPromptConfig
+
+	// ContextProvider for user/system context.
+	ContextProvider *ContextProvider
+
+	// CustomSystemPrompt overrides the default prompt when set.
+	CustomSystemPrompt string
+
+	// AppendSystemPrompt is always appended.
+	AppendSystemPrompt string
+
+	// OverrideSystemPrompt replaces everything when set.
+	OverrideSystemPrompt string
+
+	// AgentSystemPrompt from the agent definition (if any).
+	AgentSystemPrompt string
+
+	// IsProactiveMode enables proactive behavior.
+	IsProactiveMode bool
+
+	// IsCoordinatorMode enables coordinator mode.
+	IsCoordinatorMode bool
+
+	// CoordinatorSystemPrompt for coordinator mode.
+	CoordinatorSystemPrompt string
+
+	// MemoryMechanicsPrompt is the memory system prompt (if any).
+	MemoryMechanicsPrompt string
+
+	// SectionCache for memoized section values.
+	SectionCache *SectionCache
+}
+
+// BuildFullSystemPrompt constructs the complete system prompt combining:
+//  1. fetchSystemPromptParts → default prompt + user/system context
+//  2. buildEffectiveSystemPrompt → priority selection
+//  3. Context injection → system prompt + memory mechanics + append
+//
+// Returns (systemPrompt, userContext, systemContext).
+// This is the top-level function that engine.go should call.
+func BuildFullSystemPrompt(cfg FullBuildConfig) (string, map[string]string, map[string]string) {
+	// Step 1: Fetch system prompt parts
+	parts := FetchSystemPromptParts(FetchSystemPromptPartsConfig{
+		GetSystemPromptCfg: cfg.PromptConfig,
+		ContextProvider:    cfg.ContextProvider,
+		CustomSystemPrompt: cfg.CustomSystemPrompt,
+	})
+
+	// Step 2: Build effective system prompt (priority selection)
+	effective := BuildEffectiveSystemPrompt(EffectiveSystemPromptConfig{
+		AgentSystemPrompt:       cfg.AgentSystemPrompt,
+		CustomSystemPrompt:      cfg.CustomSystemPrompt,
+		DefaultSystemPrompt:     parts.DefaultSystemPrompt,
+		AppendSystemPrompt:      cfg.AppendSystemPrompt,
+		OverrideSystemPrompt:    cfg.OverrideSystemPrompt,
+		IsCoordinatorMode:       cfg.IsCoordinatorMode,
+		CoordinatorSystemPrompt: cfg.CoordinatorSystemPrompt,
+		IsProactiveMode:         cfg.IsProactiveMode,
+	})
+
+	// Step 3: Inject memory mechanics prompt if present
+	if cfg.MemoryMechanicsPrompt != "" {
+		effective = effective + "\n\n" + cfg.MemoryMechanicsPrompt
+	}
+
+	// Step 4: Append system context to prompt
+	systemPrompt := AppendSystemContextToPrompt(effective, parts.SystemContext)
+
+	return systemPrompt, parts.UserContext, parts.SystemContext
 }

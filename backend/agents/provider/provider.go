@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
+	"github.com/wall-ai/ubuilding/backend/agents/prompt"
 )
 
 // ---------------------------------------------------------------------------
@@ -25,8 +26,12 @@ type CallModelParams struct {
 	// Messages is the conversation history to send.
 	Messages []agents.Message `json:"messages"`
 
-	// SystemPrompt is the system instruction.
+	// SystemPrompt is the system instruction (plain string, used when blocks are nil).
 	SystemPrompt string `json:"system_prompt"`
+
+	// SystemPromptBlocks are cache-aware system prompt blocks.
+	// When set, these take precedence over SystemPrompt.
+	SystemPromptBlocks []prompt.SystemPromptBlock `json:"system_prompt_blocks,omitempty"`
 
 	// ThinkingConfig controls extended thinking behavior.
 	ThinkingConfig *agents.ThinkingConfig `json:"thinking_config,omitempty"`

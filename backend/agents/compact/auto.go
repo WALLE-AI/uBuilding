@@ -3,6 +3,7 @@ package compact
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
 )
@@ -167,6 +168,122 @@ func (c *AutoCompactor) callForSummary(ctx context.Context, prompt string) (stri
 		return "", fmt.Errorf("empty summary from LLM")
 	}
 	return summary, nil
+}
+
+// CompactWithTracking applies auto-compaction with tracking state and circuit breaker.
+// This corresponds to TS autoCompactIfNeeded() with full tracking support.
+func (c *AutoCompactor) CompactWithTracking(
+	ctx context.Context,
+	messages []agents.Message,
+	systemPrompt string,
+	querySource string,
+	tracking *AutoCompactTrackingState,
+	force bool,
+) *agents.AutocompactResult {
+	// Circuit breaker: skip if too many consecutive failures
+	if tracking != nil && tracking.ConsecutiveFailures >= MaxConsecutiveCompactFailures && !force {
+		return &agents.AutocompactResult{Messages: messages, Applied: false}
+	}
+
+	// Only compact if above threshold (unless forced)
+	if !force {
+		totalChars := len(systemPrompt)
+		for _, msg := range messages {
+			for _, block := range msg.Content {
+				totalChars += len(block.Text) + len(block.Thinking) + len(string(block.Input))
+				if contentStr, ok := block.Content.(string); ok {
+					totalChars += len(contentStr)
+				}
+			}
+		}
+		estimatedTokens := totalChars / 4
+		if float64(estimatedTokens) < float64(DefaultContextWindow)*AutoCompactThreshold {
+			return &agents.AutocompactResult{Messages: messages, Applied: false}
+		}
+	}
+
+	if len(messages) < 3 {
+		return &agents.AutocompactResult{Messages: messages, Applied: false}
+	}
+
+	// Find compaction boundary: keep the most recent 30% of messages
+	boundary := len(messages) * 7 / 10
+	if boundary < 2 {
+		return &agents.AutocompactResult{Messages: messages, Applied: false}
+	}
+
+	toSummarize := messages[:boundary]
+	preserved := messages[boundary:]
+
+	// Build summarization prompt
+	summaryPrompt := buildSummarizationPrompt(toSummarize)
+
+	// Call LLM for summarization
+	summary, err := c.callForSummary(ctx, summaryPrompt)
+	if err != nil {
+		if tracking != nil {
+			tracking.ConsecutiveFailures++
+		}
+		return &agents.AutocompactResult{Messages: messages, Applied: false}
+	}
+
+	// Reset failure counter on success
+	if tracking != nil {
+		tracking.ConsecutiveFailures = 0
+		tracking.Compacted = true
+		tracking.TurnCounter++
+	}
+
+	// Determine preserved segment UUIDs
+	var headUUID, tailUUID string
+	if len(preserved) > 0 {
+		headUUID = preserved[0].UUID
+		tailUUID = preserved[len(preserved)-1].UUID
+	}
+
+	// Build compacted messages: summary + preserved
+	compactedMessages := make([]agents.Message, 0, len(preserved)+1)
+	compactedMessages = append(compactedMessages, agents.Message{
+		Type:             agents.MessageTypeUser,
+		IsCompactSummary: true,
+		IsMeta:           true,
+		Timestamp:        time.Now(),
+		Content: []agents.ContentBlock{
+			{
+				Type: agents.ContentBlockText,
+				Text: fmt.Sprintf("[Context compacted. Summary of previous %d messages:]\n\n%s", boundary, summary),
+			},
+		},
+	})
+	compactedMessages = append(compactedMessages, preserved...)
+
+	// Calculate tokens saved
+	savedChars := 0
+	for _, msg := range toSummarize {
+		for _, block := range msg.Content {
+			savedChars += len(block.Text) + len(block.Thinking) + len(string(block.Input))
+		}
+	}
+
+	metadata := &agents.CompactMetadata{
+		Summary:     summary,
+		TokensSaved: savedChars / 4,
+		Trigger:     "auto",
+	}
+	if headUUID != "" || tailUUID != "" {
+		metadata.PreservedSegment = &agents.PreservedSegment{
+			HeadUUID: headUUID,
+			TailUUID: tailUUID,
+		}
+	}
+
+	return &agents.AutocompactResult{
+		Messages:    compactedMessages,
+		Applied:     true,
+		Summary:     summary,
+		TokensSaved: savedChars / 4,
+		Metadata:    metadata,
+	}
 }
 
 func truncateString(s string, maxLen int) string {

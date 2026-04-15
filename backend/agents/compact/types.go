@@ -26,6 +26,15 @@ type Compactor interface {
 	Compact(messages []agents.Message, systemPrompt string) *CompactResult
 }
 
+// AutoCompactTrackingState holds mutable state for auto-compaction across turns.
+// This corresponds to TS autoCompactTrackingState.
+type AutoCompactTrackingState struct {
+	Compacted           bool   `json:"compacted"`
+	TurnID              string `json:"turn_id"`
+	TurnCounter         int    `json:"turn_counter"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+}
+
 // Thresholds for triggering compaction (from query.ts).
 const (
 	// AutoCompactThreshold triggers LLM-based summarization at 80% of context window.
@@ -39,4 +48,7 @@ const (
 
 	// DefaultContextWindow is the default assumed context window size in tokens.
 	DefaultContextWindow = 200000
+
+	// MaxConsecutiveCompactFailures is the circuit breaker threshold.
+	MaxConsecutiveCompactFailures = 3
 )
