@@ -18,7 +18,13 @@ func GetSessionSpecificGuidanceSection(
 	enabledTools map[string]bool,
 	isAnt bool,
 	hasEmbeddedSearch bool,
+	opts ...SessionGuidanceOption,
 ) string {
+	var o sessionGuidanceOpts
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	var items []string
 
 	// AskUserQuestion guidance
@@ -36,10 +42,15 @@ func GetSessionSpecificGuidanceSection(
 
 	// AgentTool section
 	if enabledTools[AgentToolName] {
-		items = append(items, GetAgentToolSection())
+		// Fork mode uses a different agent section (TS isForkSubagentEnabled())
+		if o.isForkSubagentEnabled {
+			items = append(items, GetAgentToolForkSection())
+		} else {
+			items = append(items, GetAgentToolSection())
+		}
 
-		// Explore/Plan agent guidance (non-fork mode)
-		if !hasEmbeddedSearch {
+		// Explore/Plan agent guidance (non-fork mode only)
+		if !o.isForkSubagentEnabled && !hasEmbeddedSearch {
 			searchTools := fmt.Sprintf("the %s or %s", GlobToolName, GrepToolName)
 			items = append(items,
 				fmt.Sprintf("For simple, directed codebase searches (e.g. for a specific file/class/function) use %s directly.", searchTools),
@@ -105,6 +116,24 @@ func getVerificationAgentSection() string {
 		"The contract: when non-trivial implementation happens on your turn, independent adversarial verification must happen before you report completion — regardless of who did the implementing (you directly, a fork you spawned, or a subagent). You are the one reporting to the user; you own the gate. Non-trivial means: 3+ file edits, backend/API changes, or infrastructure changes. Spawn the %s tool with subagent_type=\"%s\". Your own checks, caveats, and a fork's self-checks do NOT substitute — only the verifier assigns a verdict; you cannot self-assign PARTIAL. Pass the original user request, all files changed (by anyone), the approach, and the plan file path if applicable. Flag concerns if you have them but do NOT share test results or claim things work. On FAIL: fix, resume the verifier with its findings plus your fix, repeat until PASS. On PASS: spot-check it — re-run 2-3 commands from its report, confirm every PASS has a Command run block with output that matches your re-run. If any PASS lacks a command block or diverges, resume the verifier with the specifics. On PARTIAL (from the verifier): report what passed and what could not be verified.",
 		AgentToolName, VerificationAgentType,
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Session guidance options (functional options pattern)
+// ---------------------------------------------------------------------------
+
+type sessionGuidanceOpts struct {
+	isForkSubagentEnabled bool
+}
+
+// SessionGuidanceOption configures GetSessionSpecificGuidanceSection.
+type SessionGuidanceOption func(*sessionGuidanceOpts)
+
+// WithForkSubagent enables the fork subagent agent section variant.
+func WithForkSubagent(enabled bool) SessionGuidanceOption {
+	return func(o *sessionGuidanceOpts) {
+		o.isForkSubagentEnabled = enabled
+	}
 }
 
 // ---------------------------------------------------------------------------

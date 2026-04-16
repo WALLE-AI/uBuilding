@@ -24,6 +24,7 @@ type EnvInfoConfig struct {
 	AdditionalDirs  []string
 	IsAnt           bool
 	IsUndercover    bool
+	IsWorktree      bool
 }
 
 // ComputeSimpleEnvInfo generates the full environment info section.
@@ -42,6 +43,10 @@ func ComputeSimpleEnvInfo(cfg EnvInfoConfig) string {
 	var envItems []string
 
 	envItems = append(envItems, fmt.Sprintf("Primary working directory: %s", cfg.Cwd))
+
+	if cfg.IsWorktree {
+		envItems = append(envItems, "This is a git worktree \u2014 an isolated copy of the repository. Run all commands from this directory. Do NOT `cd` to the original repository root.")
+	}
 
 	envItems = append(envItems, fmt.Sprintf("Is a git repository: %v", cfg.IsGit))
 
@@ -182,18 +187,30 @@ func GetKnowledgeCutoff(modelID string) string {
 
 // EnhanceSystemPromptWithEnvDetails adds env info and agent notes to a subagent prompt.
 // Maps to enhanceSystemPromptWithEnvDetails() in prompts.ts.
-func EnhanceSystemPromptWithEnvDetails(existingPrompt []string, cfg EnvInfoConfig) []string {
+// enabledToolNames is optional — when provided, DiscoverSkills guidance is
+// conditionally appended (matching TS L777-783).
+func EnhanceSystemPromptWithEnvDetails(existingPrompt []string, cfg EnvInfoConfig, enabledToolNames map[string]bool) []string {
 	notes := `Notes:
 - Agent threads always have their cwd reset between bash calls, as a result please only use absolute file paths.
 - In your final response, share file paths (always absolute, never relative) that are relevant to the task. Include code snippets only when the exact text is load-bearing (e.g., a bug you found, a function signature the caller asked for) — do not recap code you merely read.
 - For clear communication with the user the assistant MUST avoid using emojis.
 - Do not use a colon before tool calls. Text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.`
 
-	envInfo := ComputeSimpleEnvInfo(cfg)
+	// Subagents use the legacy XML <env> format (TS uses computeEnvInfo, not computeSimpleEnvInfo)
+	envInfo := ComputeEnvInfo(cfg)
 
-	result := make([]string, 0, len(existingPrompt)+2)
+	// DiscoverSkills guidance for subagents (TS L777-783)
+	var discoverSkillsGuidance string
+	if enabledToolNames != nil && enabledToolNames[DiscoverSkillsToolName] {
+		discoverSkillsGuidance = GetDiscoverSkillsGuidance()
+	}
+
+	result := make([]string, 0, len(existingPrompt)+4)
 	result = append(result, existingPrompt...)
 	result = append(result, notes)
+	if discoverSkillsGuidance != "" {
+		result = append(result, discoverSkillsGuidance)
+	}
 	if envInfo != "" {
 		result = append(result, envInfo)
 	}
@@ -254,9 +271,22 @@ func getShellInfoLine(shell, platform string) string {
 		shellName = "bash"
 	}
 	if platform == "windows" {
+		shellName = windowsPathToPosixPath(shellName)
 		return fmt.Sprintf("Shell: %s (use Unix shell syntax, not Windows — e.g., /dev/null not NUL, forward slashes in paths)", shellName)
 	}
 	return fmt.Sprintf("Shell: %s", shellName)
+}
+
+// windowsPathToPosixPath converts a Windows-style path to POSIX format.
+// Maps to windowsPathToPosixPath() in prompts.ts.
+// Example: "C:\\Windows\\System32\\bash.exe" → "/c/Windows/System32/bash.exe"
+func windowsPathToPosixPath(p string) string {
+	if len(p) < 2 || p[1] != ':' {
+		return strings.ReplaceAll(p, "\\", "/")
+	}
+	drive := strings.ToLower(string(p[0]))
+	rest := strings.ReplaceAll(p[2:], "\\", "/")
+	return "/" + drive + rest
 }
 
 func detectShell() string {

@@ -149,6 +149,12 @@ func GetSimpleDoingTasksSection(isAnt bool) string {
 		)
 	}
 
+	if isAnt {
+		items = append(items,
+			`If the user reports a bug, slowness, or unexpected behavior with Claude Code itself (as opposed to asking you to fix their own code), recommend the appropriate slash command: /issue for model-related problems (odd outputs, wrong tool choices, hallucinations, refusals), or /share to upload the full session transcript for product bugs, crashes, slowness, or general issues. Only recommend these when the user is describing a problem with Claude Code. After /share produces a ccshare link, if you have a Slack MCP tool available, offer to post the link to #claude-code-feedback (channel ID C07VBSHV7EV) for the user.`,
+		)
+	}
+
 	items = append(items,
 		`If the user asks for help or wants to give feedback inform them of the following:`,
 	)
@@ -380,6 +386,25 @@ func GetNumericLengthAnchorsSection() string {
 	return `Length limits: keep text between tool calls to ≤25 words. Keep final responses to ≤100 words unless the task requires more detail.`
 }
 
+// GetBriefSection returns the brief-mode section.
+// Maps to getBriefSection() in prompts.ts.
+// Returns "" when brief is disabled or proactive mode is active (proactive
+// section already appends the brief content inline to avoid duplication).
+func GetBriefSection(briefEnabled bool, isProactiveActive bool, briefSection string) string {
+	if !briefEnabled {
+		return ""
+	}
+	if briefSection == "" {
+		return ""
+	}
+	// When proactive is active, getProactiveSection() already appends the
+	// section inline. Skip here to avoid duplicating it in the system prompt.
+	if isProactiveActive {
+		return ""
+	}
+	return briefSection
+}
+
 // GetSimplePrompt returns a minimal system prompt for --simple mode.
 // Maps to the CLAUDE_CODE_SIMPLE path in getSystemPrompt().
 func GetSimplePrompt(cwd, date string) string {
@@ -430,12 +455,44 @@ type GetSystemPromptConfig struct {
 	Shell              string
 	OSVersion          string
 	KnowledgeCutoff    string
+
+	// IsProactiveActive enables the proactive early-return path.
+	// Maps to proactiveModule.isProactiveActive() in prompts.ts L467-489.
+	IsProactiveActive bool
+
+	// MemoryPrompt is the loaded memory prompt (CLAUDE.md content).
+	// Maps to loadMemoryPrompt() in the dynamicSections.
+	MemoryPrompt string
+
+	// BriefEnabled controls whether the brief section is included.
+	BriefEnabled bool
+
+	// BriefSection is the brief-mode text (BRIEF_PROACTIVE_SECTION).
+	BriefSection string
+
+	// McpDeltaEnabled when true skips the MCP instructions section
+	// (instructions delivered via persisted attachments instead).
+	McpDeltaEnabled bool
+
+	// IsWorktree indicates the cwd is a git worktree.
+	IsWorktree bool
+
+	// IsUndercover suppresses model name/ID references in env info.
+	IsUndercover bool
+
+	// IsForkSubagentEnabled controls the agent tool section variant.
+	IsForkSubagentEnabled bool
 }
 
 // GetSystemPrompt assembles the full system prompt array.
 // Maps to getSystemPrompt() in prompts.ts.
 // Returns a slice of non-empty prompt sections that are concatenated.
 func GetSystemPrompt(cfg GetSystemPromptConfig) []string {
+	// --- Proactive early-return path (TS L467-489) ---
+	if cfg.IsProactiveActive {
+		return getProactiveSystemPrompt(cfg)
+	}
+
 	var sections []string
 
 	// --- Static content (cacheable) ---
@@ -457,8 +514,18 @@ func GetSystemPrompt(cfg GetSystemPromptConfig) []string {
 	}
 
 	// --- Dynamic content (session-specific, registry-managed) ---
-	if s := GetSessionSpecificGuidanceSection(cfg.EnabledTools, cfg.IsAnt, cfg.HasEmbeddedSearch); s != "" {
+	// Order matches TS dynamicSections array (prompts.ts L491-555):
+	// session_guidance → memory → env_info → language → output_style →
+	// mcp_instructions → scratchpad → frc → summarize → numeric_anchors →
+	// token_budget → brief
+
+	if s := GetSessionSpecificGuidanceSection(cfg.EnabledTools, cfg.IsAnt, cfg.HasEmbeddedSearch, WithForkSubagent(cfg.IsForkSubagentEnabled)); s != "" {
 		sections = append(sections, s)
+	}
+
+	// Memory section (maps to systemPromptSection('memory', () => loadMemoryPrompt()))
+	if cfg.MemoryPrompt != "" {
+		sections = append(sections, cfg.MemoryPrompt)
 	}
 
 	envInfo := ComputeSimpleEnvInfo(EnvInfoConfig{
@@ -471,6 +538,8 @@ func GetSystemPrompt(cfg GetSystemPromptConfig) []string {
 		KnowledgeCutoff: cfg.KnowledgeCutoff,
 		AdditionalDirs:  cfg.AdditionalDirs,
 		IsAnt:           cfg.IsAnt,
+		IsUndercover:    cfg.IsUndercover,
+		IsWorktree:      cfg.IsWorktree,
 	})
 	if envInfo != "" {
 		sections = append(sections, envInfo)
@@ -482,8 +551,13 @@ func GetSystemPrompt(cfg GetSystemPromptConfig) []string {
 	if s := GetOutputStyleSection(cfg.OutputStyleName, cfg.OutputStylePrompt); s != "" {
 		sections = append(sections, s)
 	}
-	if s := GetMcpInstructionsSection(cfg.MCPClients); s != "" {
-		sections = append(sections, s)
+	// MCP instructions — DANGEROUS_uncached in TS (servers connect/disconnect
+	// between turns). When McpDeltaEnabled, instructions are delivered via
+	// persisted attachments instead.
+	if !cfg.McpDeltaEnabled {
+		if s := GetMcpInstructionsSection(cfg.MCPClients); s != "" {
+			sections = append(sections, s)
+		}
 	}
 	if s := GetScratchpadInstructions(cfg.ScratchpadDir); s != "" {
 		sections = append(sections, s)
@@ -499,6 +573,53 @@ func GetSystemPrompt(cfg GetSystemPromptConfig) []string {
 	if cfg.TokenBudgetEnabled {
 		sections = append(sections, GetTokenBudgetSection())
 	}
+
+	// Brief section (maps to systemPromptSection('brief', () => getBriefSection()))
+	if s := GetBriefSection(cfg.BriefEnabled, cfg.IsProactiveActive, cfg.BriefSection); s != "" {
+		sections = append(sections, s)
+	}
+
+	return filterEmpty(sections)
+}
+
+// getProactiveSystemPrompt returns the stripped-down prompt for proactive mode.
+// Maps to the proactive early-return path in getSystemPrompt() (TS L467-489).
+func getProactiveSystemPrompt(cfg GetSystemPromptConfig) []string {
+	intro := fmt.Sprintf("\nYou are an autonomous agent. Use the available tools to do useful work.\n\n%s", CyberRiskInstruction)
+
+	envInfo := ComputeSimpleEnvInfo(EnvInfoConfig{
+		Cwd:             cfg.Cwd,
+		IsGit:           cfg.IsGit,
+		Platform:        cfg.Platform,
+		Shell:           cfg.Shell,
+		OSVersion:       cfg.OSVersion,
+		Model:           cfg.Model,
+		KnowledgeCutoff: cfg.KnowledgeCutoff,
+		AdditionalDirs:  cfg.AdditionalDirs,
+		IsAnt:           cfg.IsAnt,
+		IsUndercover:    cfg.IsUndercover,
+		IsWorktree:      cfg.IsWorktree,
+	})
+
+	sections := []string{
+		intro,
+		GetSystemRemindersSection(),
+		cfg.MemoryPrompt,
+		envInfo,
+		GetLanguageSection(cfg.Language),
+	}
+
+	// MCP instructions (skip when delta enabled)
+	if !cfg.McpDeltaEnabled {
+		sections = append(sections, GetMcpInstructionsSection(cfg.MCPClients))
+	}
+
+	sections = append(sections,
+		GetScratchpadInstructions(cfg.ScratchpadDir),
+		GetFunctionResultClearingSection(cfg.FRCEnabled, cfg.FRCKeepRecent),
+		SummarizeToolResultsSection,
+		GetProactiveSection(),
+	)
 
 	return filterEmpty(sections)
 }
