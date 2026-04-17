@@ -50,6 +50,23 @@ func NewMicroCompactor() *MicroCompactor {
 	}
 }
 
+// NewMicroCompactorWithTimeBased creates a MicroCompactor seeded from a
+// TimeBasedMCConfig. When cfg.Enabled is false, the threshold is 0 (disabled).
+// Keeps the existing constructor call-sites untouched.
+func NewMicroCompactorWithTimeBased(cfg TimeBasedMCConfig) *MicroCompactor {
+	threshold := 0
+	if cfg.Enabled {
+		threshold = cfg.GapThresholdMinutes
+		if threshold <= 0 {
+			threshold = DefaultTimeBasedGapMinutes
+		}
+	}
+	return &MicroCompactor{
+		TimeBasedThreshold:  threshold,
+		TimeBasedKeepRecent: cfg.EffectiveKeepRecent(),
+	}
+}
+
 // Compact applies micro-compaction rules to the message history.
 // This is a pure local operation with no LLM API calls.
 //

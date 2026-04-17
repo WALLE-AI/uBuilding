@@ -22,6 +22,19 @@ type PermissionRule struct {
 	Pattern string `json:"pattern,omitempty"`
 }
 
+// NewEmptyToolPermissionContext returns a fresh, zero-config permission
+// context suitable for tests and engine bootstrap. Maps to TypeScript
+// `getEmptyToolPermissionContext()` in src/Tool.ts.
+func NewEmptyToolPermissionContext() *ToolPermissionContext {
+	return &ToolPermissionContext{
+		Mode:                         "default",
+		AdditionalWorkingDirectories: map[string]string{},
+		AlwaysAllowRules:             map[string][]PermissionRule{},
+		AlwaysDenyRules:              map[string][]PermissionRule{},
+		AlwaysAskRules:               map[string][]PermissionRule{},
+	}
+}
+
 // ToolUseContext carries all context needed during tool execution.
 // It maps to the TypeScript ToolUseContext type from Tool.ts.
 type ToolUseContext struct {

@@ -29,7 +29,10 @@ User Input → QueryEngine.SubmitMessage()
 |---------|-------------|
 | `agents` | Core engine: `QueryEngine`, `QueryLoop`, types, deps, config, budget, hooks |
 | `agents/provider` | LLM adapters: Anthropic (official SDK), OpenAI-compatible (Ollama/vLLM/GPT) |
-| `agents/tool` | Tool system: `Tool` interface, `Registry`, `Orchestrator`, `StreamingToolExecutor` |
+| `agents/tool` | Tool system: `Tool` interface, `BuildTool` factory, `Registry`, `AssembleToolPool`, `FilterByDenyRules`, `Orchestrator`, `StreamingToolExecutor` |
+| `agents/tool/builtin` | Built-in tool set (`WebSearch`, `WebFetch`). Install via `builtin.Register(registry)` — tools are tagged `WithBuiltin()` so `AssembleToolPool` keeps them as the cache-friendly prefix |
+| `agents/tool/webfetch` | `WebFetch` tool: SSRF guard, domain blocklist, 140+ preapproved hosts, markdown-passthrough fast path, optional `SideQuerier` summarization with compliance guardrails, cross-host redirect template |
+| `agents/tool/websearch` | `WebSearch` tool: Brave API + DuckDuckGo fallback, Sources-section prompt, current-month/year injection |
 | `agents/compact` | Context compression: `MicroCompactor` (local), `AutoCompactor` (LLM-powered) |
 | `agents/permission` | Permission chain: deny → allow → ask with glob pattern matching |
 | `agents/prompt` | System prompt builder (6-layer) + message normalization + thinking rules |

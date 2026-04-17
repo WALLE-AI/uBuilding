@@ -179,6 +179,9 @@ func QueryLoop(ctx context.Context, params QueryParams, deps QueryDeps, ch chan<
 
 			messagesForQuery = compactionResult.Messages
 			ch <- StreamEvent{Type: EventCompactBoundary}
+			if params.OnCompactBoundary != nil {
+				params.OnCompactBoundary()
+			}
 		}
 
 		// Update toolUseContext.Messages (TS L546-549)
@@ -215,6 +218,10 @@ func QueryLoop(ctx context.Context, params QueryParams, deps QueryDeps, ch chan<
 		memoryPrefetchCh := deps.StartMemoryPrefetch(messagesForQuery, toolUseContext)
 
 		// ---------- Phase 8: Prepare API call (TS L560-580) ----------
+		// TODO(E4): prefetchAllMcpResources — when MCP resource tooling is added,
+		// trigger async resource prefetch here (TS services/mcp/prefetch.ts). For
+		// now, MCP resources are assumed to be warm-loaded by the caller or not
+		// used; gate behind a feature flag on QueryParams if we need it later.
 		toolDefs := deps.BuildToolDefinitions(toolUseContext)
 		currentModel := getModel(params)
 
@@ -462,6 +469,9 @@ func QueryLoop(ctx context.Context, params QueryParams, deps QueryDeps, ch chan<
 						ch <- StreamEvent{Type: EventAssistant, Message: &msg}
 					}
 					ch <- StreamEvent{Type: EventCompactBoundary}
+					if params.OnCompactBoundary != nil {
+						params.OnCompactBoundary()
+					}
 
 					state = &LoopState{
 						Messages:                     compacted.Messages,

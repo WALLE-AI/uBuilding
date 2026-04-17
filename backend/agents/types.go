@@ -195,6 +195,12 @@ type QueryParams struct {
 	SkipCacheWrite bool
 	// CanUseTool is the permission check function for tool execution.
 	CanUseTool func(toolName string, input map[string]interface{}) (bool, string)
+
+	// OnCompactBoundary is invoked whenever a compact boundary is emitted
+	// (autocompact, reactive compact). Callers typically wire this to
+	// prompt.SectionCache.Clear() to match TS clearSystemPromptSections()
+	// semantics. Nil means no-op.
+	OnCompactBoundary func()
 }
 
 // TaskBudget configures a token budget for the entire task.
@@ -331,6 +337,12 @@ type EngineConfig struct {
 	// DiscoverSkills discovers slash-command tool skills available in the cwd.
 	// Called before the query loop starts. Nil means no skill discovery.
 	DiscoverSkills func(cwd string) []SkillInfo
+
+	// OnCompactBoundary is invoked by the query loop whenever a compact
+	// boundary is emitted (autocompact, reactive compact, or manual /compact).
+	// Callers typically wire this to prompt.SectionCache.Clear() to match
+	// TS clearSystemPromptSections() semantics. Nil means no-op.
+	OnCompactBoundary func()
 }
 
 // ThinkingConfig controls extended thinking behavior.

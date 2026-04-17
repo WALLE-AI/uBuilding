@@ -375,3 +375,132 @@ func TestQueryLoop_BlockingLimitWithoutReactiveCompact(t *testing.T) {
 	// With ReactiveCompact: true (default), we reach the API call with nil responses
 	assert.Equal(t, agents.TerminalModelError, terminal.Reason)
 }
+
+// ---------------------------------------------------------------------------
+// Phase D2: OnCompactBoundary hook fires at autocompact boundaries
+// ---------------------------------------------------------------------------
+
+func TestQueryLoop_OnCompactBoundary_InvokedByAutocompact(t *testing.T) {
+	// autocompact returns Applied=true once; model responds with end_turn.
+	deps := &qloopDeps{
+		responses: []agents.Message{
+			{
+				Type:       agents.MessageTypeAssistant,
+				StopReason: "end_turn",
+				Content:    []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "ok"}},
+			},
+		},
+		autocompactFn: func(_ context.Context, msgs []agents.Message) *agents.AutocompactResult {
+			return &agents.AutocompactResult{Messages: msgs, Applied: true}
+		},
+	}
+
+	ch := make(chan agents.StreamEvent, 128)
+	boundaryCalls := 0
+	params := agents.QueryParams{
+		Messages:     []agents.Message{{Type: agents.MessageTypeUser, Content: []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "Hi"}}}},
+		SystemPrompt: "sys",
+		MaxTurns:     5,
+		OnCompactBoundary: func() {
+			boundaryCalls++
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	terminal := agents.QueryLoop(ctx, params, deps, ch, nil)
+	require.NotNil(t, terminal)
+
+	// At least one boundary was emitted by autocompact.
+	assert.GreaterOrEqual(t, boundaryCalls, 1, "OnCompactBoundary should fire on autocompact")
+}
+
+// ---------------------------------------------------------------------------
+// Phase G2: prompt-too-long triggers reactive compact recovery
+// ---------------------------------------------------------------------------
+
+func TestQueryLoop_PromptTooLong_TriggersReactiveCompact(t *testing.T) {
+	// Turn 1: API returns an assistant message flagged as a prompt-too-long error.
+	// Turn 2 (after reactive compact): end_turn normally.
+	deps := &qloopDeps{
+		responses: []agents.Message{
+			{
+				Type:       agents.MessageTypeAssistant,
+				IsApiError: true,
+				StopReason: "end_turn",
+				Content:    []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "prompt is too long"}},
+			},
+			{
+				Type:       agents.MessageTypeAssistant,
+				StopReason: "end_turn",
+				Content:    []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "ok"}},
+			},
+		},
+	}
+
+	// Override ReactiveCompact via a wrapper dep.
+	wrapped := &reactiveWrap{qloopDeps: deps, reactiveApplied: 0}
+
+	ch := make(chan agents.StreamEvent, 256)
+	boundaryCalls := 0
+	params := agents.QueryParams{
+		Messages:     []agents.Message{{Type: agents.MessageTypeUser, Content: []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "Hi"}}}},
+		SystemPrompt: "sys",
+		MaxTurns:     5,
+		OnCompactBoundary: func() {
+			boundaryCalls++
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	terminal := agents.QueryLoop(ctx, params, wrapped, ch, nil)
+	require.NotNil(t, terminal)
+
+	assert.GreaterOrEqual(t, wrapped.reactiveApplied, 1, "ReactiveCompact should fire on prompt-too-long")
+	assert.GreaterOrEqual(t, boundaryCalls, 1, "OnCompactBoundary should fire after reactive compact")
+}
+
+// reactiveWrap wraps qloopDeps and returns Applied=true for the first
+// ReactiveCompact call, enabling the recovery branch test above.
+type reactiveWrap struct {
+	*qloopDeps
+	reactiveApplied int
+}
+
+func (r *reactiveWrap) ReactiveCompact(_ context.Context, messages []agents.Message, _ *agents.ToolUseContext, _ string, _ string, _ bool) *agents.AutocompactResult {
+	r.reactiveApplied++
+	return &agents.AutocompactResult{Messages: messages, Applied: true}
+}
+
+func TestQueryLoop_OnCompactBoundary_NilIsSafe(t *testing.T) {
+	// Ensures nil OnCompactBoundary does not panic when autocompact fires.
+	deps := &qloopDeps{
+		responses: []agents.Message{
+			{
+				Type:       agents.MessageTypeAssistant,
+				StopReason: "end_turn",
+				Content:    []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "ok"}},
+			},
+		},
+		autocompactFn: func(_ context.Context, msgs []agents.Message) *agents.AutocompactResult {
+			return &agents.AutocompactResult{Messages: msgs, Applied: true}
+		},
+	}
+
+	ch := make(chan agents.StreamEvent, 128)
+	params := agents.QueryParams{
+		Messages: []agents.Message{{Type: agents.MessageTypeUser, Content: []agents.ContentBlock{{Type: agents.ContentBlockText, Text: "Hi"}}}},
+		MaxTurns: 5,
+		// OnCompactBoundary intentionally nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Should not panic.
+	terminal := agents.QueryLoop(ctx, params, deps, ch, nil)
+	require.NotNil(t, terminal)
+}

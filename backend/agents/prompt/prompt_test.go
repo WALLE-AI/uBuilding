@@ -571,3 +571,324 @@ func TestEnhanceSystemPromptWithEnvDetails_WithDiscoverSkills(t *testing.T) {
 	combined := strings.Join(result, "\n")
 	assert.Contains(t, combined, "Skills relevant to your task")
 }
+
+// ---------------------------------------------------------------------------
+// Phase A7: Golden-substring tests per section — guard against regressions in
+// prompt text. One assertion per section, targeting a load-bearing bullet.
+// ---------------------------------------------------------------------------
+
+func TestSection_Intro_ContainsIdentity(t *testing.T) {
+	s := prompt.GetSimpleIntroSection("")
+	assert.Contains(t, s, "You are an interactive agent")
+	assert.Contains(t, s, "software engineering tasks")
+	assert.Contains(t, s, "NEVER generate or guess URLs")
+}
+
+func TestSection_System_AllBullets(t *testing.T) {
+	s := prompt.GetSimpleSystemSection()
+	assert.Contains(t, s, "# System")
+	assert.Contains(t, s, "Github-flavored markdown")
+	assert.Contains(t, s, "user-selected permission mode")
+	assert.Contains(t, s, "<system-reminder>")
+	assert.Contains(t, s, "prompt injection")
+	assert.Contains(t, s, "automatically compress prior messages")
+}
+
+func TestSection_DoingTasks_Baseline(t *testing.T) {
+	s := prompt.GetSimpleDoingTasksSection(false)
+	assert.Contains(t, s, "# Doing tasks")
+	assert.Contains(t, s, "software engineering tasks")
+	assert.Contains(t, s, "do not propose changes to code you haven't read")
+	assert.Contains(t, s, "security vulnerabilities")
+}
+
+func TestSection_DoingTasks_AntAddsFaithfulReporting(t *testing.T) {
+	s := prompt.GetSimpleDoingTasksSection(true)
+	assert.Contains(t, s, "Report outcomes faithfully")
+	assert.Contains(t, s, "collaborator")
+}
+
+func TestSection_Actions_RiskyBullets(t *testing.T) {
+	s := prompt.GetActionsSection()
+	assert.Contains(t, s, "# Executing actions with care")
+	assert.Contains(t, s, "Destructive operations")
+	assert.Contains(t, s, "Hard-to-reverse")
+	assert.Contains(t, s, "measure twice, cut once")
+}
+
+func TestSection_UsingTools_DedicatedToolsGuidance(t *testing.T) {
+	tools := map[string]bool{prompt.TodoWriteToolName: true}
+	s := prompt.GetUsingYourToolsSection(tools, false)
+	assert.Contains(t, s, "# Using your tools")
+	assert.Contains(t, s, "Do NOT use the Bash")
+	assert.Contains(t, s, "To read files use Read")
+	assert.Contains(t, s, "To search for files use Glob")
+	assert.Contains(t, s, "multiple tools in a single response")
+}
+
+func TestSection_UsingTools_EmbeddedSearchSkipsGlobGrep(t *testing.T) {
+	s := prompt.GetUsingYourToolsSection(map[string]bool{}, true)
+	assert.NotContains(t, s, "To search for files use Glob")
+	assert.NotContains(t, s, "To search the content of files")
+}
+
+func TestSection_ToneAndStyle_Baseline(t *testing.T) {
+	s := prompt.GetSimpleToneAndStyleSection(false)
+	assert.Contains(t, s, "# Tone and style")
+	assert.Contains(t, s, "Only use emojis")
+	assert.Contains(t, s, "short and concise")
+	assert.Contains(t, s, "file_path:line_number")
+	assert.Contains(t, s, "owner/repo#123")
+}
+
+func TestSection_ToneAndStyle_AntSkipsShortConcise(t *testing.T) {
+	s := prompt.GetSimpleToneAndStyleSection(true)
+	assert.NotContains(t, s, "Your responses should be short and concise.")
+}
+
+func TestSection_OutputEfficiency_NonAnt(t *testing.T) {
+	s := prompt.GetOutputEfficiencySection(false)
+	assert.Contains(t, s, "# Output efficiency")
+	assert.Contains(t, s, "Go straight to the point")
+}
+
+func TestSection_OutputEfficiency_Ant(t *testing.T) {
+	s := prompt.GetOutputEfficiencySection(true)
+	assert.Contains(t, s, "# Communicating with the user")
+	assert.Contains(t, s, "inverted pyramid")
+}
+
+func TestSection_Hooks_TextParity(t *testing.T) {
+	s := prompt.GetHooksSection()
+	assert.Contains(t, s, "hooks")
+	assert.Contains(t, s, "<user-prompt-submit-hook>")
+}
+
+func TestSection_SystemReminders_TwoBullets(t *testing.T) {
+	s := prompt.GetSystemRemindersSection()
+	assert.Contains(t, s, "<system-reminder>")
+	assert.Contains(t, s, "unlimited context")
+}
+
+func TestSection_Language_EmptyWhenUnset(t *testing.T) {
+	assert.Equal(t, "", prompt.GetLanguageSection(""))
+	s := prompt.GetLanguageSection("中文")
+	assert.Contains(t, s, "# Language")
+	assert.Contains(t, s, "中文")
+}
+
+func TestSection_OutputStyle_EmptyWhenUnset(t *testing.T) {
+	assert.Equal(t, "", prompt.GetOutputStyleSection("", ""))
+	s := prompt.GetOutputStyleSection("Explanatory", "explain things")
+	assert.Contains(t, s, "# Output Style: Explanatory")
+	assert.Contains(t, s, "explain things")
+}
+
+func TestSection_McpInstructions_EmptyWhenNoClients(t *testing.T) {
+	assert.Equal(t, "", prompt.GetMcpInstructionsSection(nil))
+	clients := []prompt.MCPClient{
+		{Name: "srv1", Instructions: "do X", Connected: true},
+		{Name: "srv2", Instructions: "", Connected: true},      // filtered
+		{Name: "srv3", Instructions: "do Z", Connected: false}, // filtered
+	}
+	s := prompt.GetMcpInstructionsSection(clients)
+	assert.Contains(t, s, "# MCP Server Instructions")
+	assert.Contains(t, s, "## srv1")
+	assert.Contains(t, s, "do X")
+	assert.NotContains(t, s, "srv2")
+	assert.NotContains(t, s, "srv3")
+}
+
+func TestSection_Scratchpad_EmptyWhenUnset(t *testing.T) {
+	assert.Equal(t, "", prompt.GetScratchpadInstructions(""))
+	s := prompt.GetScratchpadInstructions("/var/run/scratch")
+	assert.Contains(t, s, "# Scratchpad Directory")
+	assert.Contains(t, s, "/var/run/scratch")
+	assert.Contains(t, s, "Only use /tmp if the user explicitly requests it")
+}
+
+func TestSection_FRC_EmptyWhenDisabled(t *testing.T) {
+	assert.Equal(t, "", prompt.GetFunctionResultClearingSection(false, 5))
+	s := prompt.GetFunctionResultClearingSection(true, 7)
+	assert.Contains(t, s, "# Function Result Clearing")
+	assert.Contains(t, s, "7 most recent")
+}
+
+func TestSection_TokenBudget_TextParity(t *testing.T) {
+	s := prompt.GetTokenBudgetSection()
+	assert.Contains(t, s, "token target")
+	assert.Contains(t, s, "hard minimum")
+}
+
+func TestSection_NumericLengthAnchors_TextParity(t *testing.T) {
+	s := prompt.GetNumericLengthAnchorsSection()
+	assert.Contains(t, s, "≤25 words")
+	assert.Contains(t, s, "≤100 words")
+}
+
+func TestSection_Brief_GuardMatrix(t *testing.T) {
+	// disabled → empty
+	assert.Equal(t, "", prompt.GetBriefSection(false, false, "BRIEF"))
+	// enabled but empty content → empty
+	assert.Equal(t, "", prompt.GetBriefSection(true, false, ""))
+	// enabled + proactive → empty (proactive path appends it)
+	assert.Equal(t, "", prompt.GetBriefSection(true, true, "BRIEF"))
+	// enabled normal
+	assert.Equal(t, "BRIEF", prompt.GetBriefSection(true, false, "BRIEF"))
+}
+
+// ---------------------------------------------------------------------------
+// Phase B4: computeSimpleEnvInfo line-ordering golden
+// ---------------------------------------------------------------------------
+
+func TestComputeSimpleEnvInfo_LineOrder(t *testing.T) {
+	cfg := prompt.EnvInfoConfig{
+		Cwd:             "/work/proj",
+		IsGit:           true,
+		Platform:        "linux",
+		Shell:           "/bin/zsh",
+		OSVersion:       "Linux 6.6.4",
+		Model:           "claude-sonnet-4-6-20250801",
+		KnowledgeCutoff: "August 2025",
+		AdditionalDirs:  []string{"/work/a", "/work/b"},
+	}
+	result := prompt.ComputeSimpleEnvInfo(cfg)
+
+	// Verify expected lines appear in this order.
+	expected := []string{
+		"# Environment",
+		"Primary working directory: /work/proj",
+		"Is a git repository: true",
+		"Additional working directories:",
+		"/work/a",
+		"/work/b",
+		"Platform: linux",
+		"Shell: zsh",
+		"OS Version: Linux 6.6.4",
+		"You are powered by the model named Claude Sonnet 4.6",
+		"Assistant knowledge cutoff is August 2025.",
+		"most recent Claude model family is Claude 4.5/4.6",
+		"Claude Code is available as a CLI",
+		"Fast mode for Claude Code",
+	}
+	idx := 0
+	for _, e := range expected {
+		pos := strings.Index(result[idx:], e)
+		if pos < 0 {
+			t.Fatalf("expected substring %q missing or out-of-order; remaining output:\n%s", e, result[idx:])
+		}
+		idx += pos + len(e)
+	}
+}
+
+func TestWindowsPathToPosixPath_ViaShellInfoLine(t *testing.T) {
+	// When platform=windows, shell path is normalized; validate through getShellInfoLine.
+	s := prompt.ComputeSimpleEnvInfo(prompt.EnvInfoConfig{
+		Cwd:       "C:/work",
+		Platform:  "windows",
+		Shell:     `C:\Program Files\Git\bin\bash.exe`,
+		OSVersion: "Windows 11",
+	})
+	assert.Contains(t, s, "use Unix shell syntax")
+	// Path is normalized to posix "bash" or the drive form; assert forward slashes only.
+	assert.NotContains(t, s, `C:\`)
+}
+
+// ---------------------------------------------------------------------------
+// Phase G4: GetSystemPrompt golden snapshot — anchors the full assembly order.
+// Stable-by-design: uses fixed config with no time/env bleed-through.
+// ---------------------------------------------------------------------------
+
+func TestGetSystemPrompt_GoldenAssembly(t *testing.T) {
+	cfg := prompt.GetSystemPromptConfig{
+		Cwd:               "/golden/cwd",
+		Model:             "claude-sonnet-4-6-20250801",
+		KnowledgeCutoff:   "August 2025",
+		Platform:          "linux",
+		Shell:             "/bin/bash",
+		OSVersion:         "Linux 6.6.4",
+		EnabledTools:      map[string]bool{prompt.TodoWriteToolName: true},
+		HasEmbeddedSearch: false,
+		IsAnt:             false,
+		Language:          "",
+		UseGlobalCache:    true,
+	}
+	sections := prompt.GetSystemPrompt(cfg)
+	require.NotEmpty(t, sections)
+
+	combined := strings.Join(sections, "\n---\n")
+
+	// Required static sections (pre-boundary).
+	wantBefore := []string{
+		"You are an interactive agent",
+		"# System",
+		"# Doing tasks",
+		"# Executing actions with care",
+		"# Using your tools",
+		"# Tone and style",
+		"# Output efficiency",
+	}
+
+	// Required dynamic sections (post-boundary).
+	wantAfter := []string{
+		"# Environment",
+		"Primary working directory: /golden/cwd",
+		"claude-sonnet-4-6-20250801",
+		"Assistant knowledge cutoff is August 2025",
+	}
+
+	// Anchor: DYNAMIC_BOUNDARY must appear exactly once and before every dynamic section.
+	boundaryIdx := strings.Index(combined, prompt.SystemPromptDynamicBoundary)
+	require.GreaterOrEqual(t, boundaryIdx, 0, "DYNAMIC_BOUNDARY missing")
+	assert.Equal(t, boundaryIdx, strings.LastIndex(combined, prompt.SystemPromptDynamicBoundary), "DYNAMIC_BOUNDARY should appear once")
+
+	// All static headings must precede the boundary.
+	for _, s := range wantBefore {
+		pos := strings.Index(combined, s)
+		require.GreaterOrEqual(t, pos, 0, "missing static heading %q", s)
+		assert.Less(t, pos, boundaryIdx, "static heading %q should be before DYNAMIC_BOUNDARY", s)
+	}
+
+	// All dynamic heading must follow the boundary.
+	for _, s := range wantAfter {
+		pos := strings.Index(combined, s)
+		require.GreaterOrEqual(t, pos, 0, "missing dynamic content %q", s)
+		assert.Greater(t, pos, boundaryIdx, "dynamic content %q should be after DYNAMIC_BOUNDARY", s)
+	}
+
+	// SummarizeToolResultsSection must appear (it's always included in dynamic zone).
+	assert.Contains(t, combined, "write down any important information")
+}
+
+func TestBuildSubagentSystemPrompt_DefaultsToDefaultAgentPrompt(t *testing.T) {
+	cfg := prompt.EnvInfoConfig{Cwd: "/tmp", Platform: "linux", Shell: "/bin/bash"}
+	parts := prompt.BuildSubagentSystemPrompt("", cfg, nil)
+	require.True(t, len(parts) >= 3)
+	assert.Equal(t, prompt.DefaultAgentPrompt, parts[0])
+	joined := strings.Join(parts, "\n")
+	assert.Contains(t, joined, "Notes:")
+	assert.Contains(t, joined, "<env>")
+}
+
+func TestBuildSubagentSystemPrompt_CustomOverridesDefault(t *testing.T) {
+	cfg := prompt.EnvInfoConfig{Cwd: "/tmp", Platform: "linux", Shell: "/bin/bash"}
+	parts := prompt.BuildSubagentSystemPrompt("CUSTOM SYSTEM", cfg, nil)
+	assert.Equal(t, "CUSTOM SYSTEM", parts[0])
+	assert.NotContains(t, parts[0], prompt.DefaultAgentPrompt)
+}
+
+func TestGetKnowledgeCutoff_AllFamilies(t *testing.T) {
+	// B1 parity: every supported family resolves to a non-empty date.
+	cases := map[string]string{
+		"claude-sonnet-4-6-20250801": "August 2025",
+		"claude-opus-4-6-20250601":   "May 2025",
+		"claude-opus-4-5-20250505":   "May 2025",
+		"claude-haiku-4-5-20251001":  "February 2025",
+		"claude-opus-4-20250101":     "January 2025",
+		"claude-sonnet-4-20250201":   "January 2025",
+	}
+	for model, want := range cases {
+		assert.Equal(t, want, prompt.GetKnowledgeCutoff(model), "model=%s", model)
+	}
+	assert.Equal(t, "", prompt.GetKnowledgeCutoff("unknown-model"))
+}

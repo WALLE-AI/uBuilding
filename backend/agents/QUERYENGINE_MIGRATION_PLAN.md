@@ -287,37 +287,41 @@ runTools / StreamingToolExecutor
 
 ### 3.1 HIGH Priority (Functional Gaps)
 
-| # | Gap | TS Location | Go Location | Impact |
+| # | Gap | TS Location | Go Location | Status |
 |---|-----|-------------|-------------|--------|
-| H1 | **Prompt text completeness** — verify all 915 lines of `prompts.ts` text are ported | `constants/prompts.ts:1-915` | `prompt/prompts.go` | Behavioral fidelity |
-| H2 | **computeSimpleEnvInfo full parity** — model family IDs, knowledge cutoff, shell info, worktree detection | `prompts.ts:651-710` | `prompt/env_info.go` | Env context accuracy |
-| H3 | **MCP instructions section** — connected MCP server instructions | `prompts.ts:579-604` | Not in prompts.go | MCP server support |
-| H4 | **Proactive/autonomous mode prompt** — 50-line proactive section | `prompts.ts:860-914` | Not ported | Proactive mode |
-| H5 | **Scratchpad instructions** — per-session temp dir | `prompts.ts:797-819` | Not ported | Scratchpad feature |
-| H6 | **Function Result Clearing section** — old tool results clearing | `prompts.ts:821-839` | Not ported | Context management |
-| H7 | **Token budget prompt section** — budget continuation instructions | `prompts.ts:538-551` | Not ported | Budget feature |
-| H8 | **Numeric length anchors** (ant-only) | `prompts.ts:529-537` | Not needed | Ant-only feature |
+| H1 | **Prompt text completeness** — all 18 sections ported | `constants/prompts.ts:1-800` | `prompt/prompts.go` | ✅ Done (A1–A8, 20 section tests) |
+| H2 | **computeSimpleEnvInfo full parity** | `prompts.ts:651-744` | `prompt/env_info.go` | ✅ Done (B1–B5, line-order + Windows path + cutoff tests) |
+| H3 | **MCP instructions section** | `prompts.ts:579-604` | `prompt/prompts.go` | ✅ Done |
+| H4 | **Proactive/autonomous mode prompt** | `prompts.ts:860-914` | `prompt/prompts.go:587+` | ✅ Done |
+| H5 | **Scratchpad instructions** | `prompts.ts:797-819` | `prompt/prompts.go:346` | ✅ Done |
+| H6 | **Function Result Clearing section** | `prompts.ts:821-839` | `prompt/prompts.go:369` | ✅ Done |
+| H7 | **Token budget prompt section** | `prompts.ts:538-551` | `prompt/prompts.go:380` | ✅ Done |
+| H8 | **Numeric length anchors** (ant-only) | `prompts.ts:529-537` | `prompt/prompts.go:385` | ✅ Done |
 
 ### 3.2 MEDIUM Priority (Behavioral Refinements)
 
-| # | Gap | TS Location | Go Location | Impact |
+| # | Gap | TS Location | Go Location | Status |
 |---|-----|-------------|-------------|--------|
-| M1 | **Section cache (memoization)** — verify `SectionCache` matches TS cacheBreak semantics | `systemPromptSections.ts:43-58` | `prompt/cache.go` | Cache efficiency |
-| M2 | **DANGEROUS_uncachedSystemPromptSection** — volatile sections that recompute every turn | `systemPromptSections.ts:32-38` | `prompt/sections.go` | Cache break semantics |
-| M3 | **enhanceSystemPromptWithEnvDetails** — subagent prompt enhancement | `prompts.ts:760-791` | Not ported | Subagent prompts |
-| M4 | **Knowledge cutoff per model** — model-specific cutoff dates | `prompts.ts:713-730` | `prompt/env_info.go` | Model accuracy |
-| M5 | **Brief mode section** — Kairos brief mode | `prompts.ts:843-858` | Not ported | Brief mode |
-| M6 | **Output style section** — custom output style config | `prompts.ts:505-507` | Partial | Custom outputs |
+| M1 | **Section cache (memoization)** — `SectionCache` + `TestSectionCache_*` | `systemPromptSections.ts:43-58` | `prompt/cache.go`, `prompt/sections.go` | ✅ Done |
+| M2 | **DANGEROUS_uncachedSystemPromptSection** — cache-break semantics | `systemPromptSections.ts:32-38` | `prompt/sections.go` | ✅ Done |
+| M3 | **enhanceSystemPromptWithEnvDetails** — subagent prompt enhancement | `prompts.ts:760-791` | `prompt/env_info.go:188`; `BuildSubagentSystemPrompt` helper added (C3) | ✅ Done |
+| M4 | **Knowledge cutoff per model** | `prompts.ts:713-744` | `prompt/env_info.go:166` + all-families test | ✅ Done |
+| M5 | **Brief mode section** — Kairos brief mode | `prompts.ts:843-858` | `prompt/prompts.go:393` + guard-matrix test | ✅ Done |
+| M6 | **Output style section** | `prompts.ts:151-158` | `prompt/prompts.go:304` | ✅ Done |
+| M7 | **OnCompactBoundary hook** — clearSystemPromptSections parity | `query.ts` compact sites | `EngineConfig.OnCompactBoundary` → `QueryParams` → `queryloop.go` (D1/D2) | ✅ Done |
+| M8 | **Provider streaming error branches** — fallback / image / prompt-too-long / media-size / max-output-tokens | `services/api/claude.ts` + `errors.ts` | `provider/` + `queryloop.go` withhold branches | ✅ Done |
+| M9 | **Provider prompt cache-break** — `SystemPromptBlocks` + `cache_control` | `promptCacheBreakDetection.ts` | `prompt/cache.go` + `provider/anthropic.go` | ✅ Done |
+| M10 | **Compact auxiliary** — `apiMicrocompact` / `timeBasedMCConfig` / `sessionMemoryCompact` | `services/compact/` | `compact/api_micro.go`, `compact/time_based.go`, `compact/session_memory.go` (F2–F5) | ✅ Done |
 
 ### 3.3 LOW Priority (Polish / Edge Cases)
 
-| # | Gap | Description |
-|---|-----|-------------|
-| L1 | `windowsPathToPosixPath` in shell info | Windows path normalization |
-| L2 | `getMarketingNameForModel` | Marketing name resolution |
-| L3 | Undercover mode suppression | `isUndercover()` model name suppression |
-| L4 | `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` cache scope gating | `shouldUseGlobalCacheScope()` |
-| L5 | `prefetchAllMcpResources` in API call setup | MCP resource prefetch |
+| # | Gap | Status |
+|---|-----|--------|
+| L1 | `windowsPathToPosixPath` in shell info | ✅ Done (`prompt/env_info.go:283`) |
+| L2 | `getMarketingNameForModel` | ✅ Done (`prompt/env_info.go:237`) |
+| L3 | Undercover mode suppression | ✅ Done (`IsUndercover` flag in `EnvInfoConfig`) |
+| L4 | `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` cache scope gating | ✅ Done (`UseGlobalCache` flag + `SplitSystemPromptBlocks` in `prompt/cache.go`) |
+| L5 | `prefetchAllMcpResources` in API call setup | 🟡 TODO (E4): commented in `queryloop.go` Phase 8; no-op until MCP resource tooling is added |
 
 ---
 

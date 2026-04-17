@@ -132,6 +132,18 @@ func (d *realDeps) CallModel(ctx context.Context, params agents.CallModelParams)
 	if params.MaxOutputTokens != nil {
 		providerParams.MaxOutputTokens = params.MaxOutputTokens
 	}
+	// Forward tool definitions so the model sees them. The integration tests
+	// that don't use tools simply pass nil, which is fine.
+	if len(params.Tools) > 0 {
+		providerParams.Tools = make([]provider.ToolDefinition, len(params.Tools))
+		for i, t := range params.Tools {
+			providerParams.Tools[i] = provider.ToolDefinition{
+				Name:        t.Name,
+				Description: t.Description,
+				InputSchema: t.InputSchema,
+			}
+		}
+	}
 	return d.provider.CallModel(ctx, providerParams)
 }
 

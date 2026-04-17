@@ -185,6 +185,22 @@ func GetKnowledgeCutoff(modelID string) string {
 // Agent prompt enhancement
 // ---------------------------------------------------------------------------
 
+// BuildSubagentSystemPrompt assembles the default system prompt for a Task-style
+// subagent: [DefaultAgentPrompt] + EnhanceSystemPromptWithEnvDetails result.
+// When customSystemPrompt is non-empty, it REPLACES DefaultAgentPrompt
+// (matches TS Task.ts behaviour: custom agent prompts override the default).
+//
+// Intended call site: whenever a Task/subagent tool is added to the registry,
+// invoke this to build the subagent's system prompt before handing off to
+// QueryEngine.
+func BuildSubagentSystemPrompt(customSystemPrompt string, cfg EnvInfoConfig, enabledToolNames map[string]bool) []string {
+	base := customSystemPrompt
+	if base == "" {
+		base = DefaultAgentPrompt
+	}
+	return EnhanceSystemPromptWithEnvDetails([]string{base}, cfg, enabledToolNames)
+}
+
 // EnhanceSystemPromptWithEnvDetails adds env info and agent notes to a subagent prompt.
 // Maps to enhanceSystemPromptWithEnvDetails() in prompts.ts.
 // enabledToolNames is optional — when provided, DiscoverSkills guidance is

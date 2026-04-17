@@ -64,16 +64,16 @@ type Tool interface {
 
 // ToolResult is the output of a tool execution.
 type ToolResult struct {
-	Data            interface{}        `json:"data"`
-	NewMessages     []agents.Message   `json:"new_messages,omitempty"`
+	Data            interface{}                                             `json:"data"`
+	NewMessages     []agents.Message                                        `json:"new_messages,omitempty"`
 	ContextModifier func(ctx *agents.ToolUseContext) *agents.ToolUseContext `json:"-"`
 }
 
 // JSONSchema represents a JSON Schema definition for tool inputs.
 type JSONSchema struct {
-	Type       string                 `json:"type"`
+	Type       string                     `json:"type"`
 	Properties map[string]*SchemaProperty `json:"properties,omitempty"`
-	Required   []string               `json:"required,omitempty"`
+	Required   []string                   `json:"required,omitempty"`
 }
 
 // SchemaProperty defines a single property in a JSON Schema.
@@ -90,14 +90,55 @@ type PermissionResult struct {
 	UpdatedInput json.RawMessage `json:"updated_input,omitempty"`
 	Message      string          `json:"message,omitempty"`
 	// RiskLevel indicates assessed risk: "low" | "medium" | "high"
-	RiskLevel    string          `json:"risk_level,omitempty"`
+	RiskLevel string `json:"risk_level,omitempty"`
+	// DecisionReason is a short machine-readable tag explaining why this
+	// decision was taken (e.g. "preapproved", "blocklist", "default").
+	// Maps to TypeScript `decisionReason` on PermissionResult.
+	DecisionReason string `json:"decision_reason,omitempty"`
+	// Suggestions are permission-rule additions the UI can offer the user
+	// (e.g. "always allow WebFetch for example.com"). Empty when not applicable.
+	Suggestions []PermissionUpdate `json:"suggestions,omitempty"`
 }
 
-// Permission behaviors
+// PermissionUpdate is a suggested modification to the permission rule set,
+// surfaced by a tool's CheckPermissions when the result is "ask" or "allow".
+// Mirrors a subset of claude-code's PermissionUpdate union.
+type PermissionUpdate struct {
+	// Type describes what kind of change (e.g. "addRules", "removeRules").
+	Type string `json:"type"`
+	// Destination indicates where the rule should be persisted.
+	Destination string `json:"destination,omitempty"`
+	// Rules are the rule entries to add/remove.
+	Rules []PermissionRuleUpdate `json:"rules,omitempty"`
+	// Behavior for addRules: "allow" | "deny" | "ask".
+	Behavior string `json:"behavior,omitempty"`
+}
+
+// PermissionRuleUpdate is a single rule entry carried inside PermissionUpdate.
+type PermissionRuleUpdate struct {
+	ToolName    string `json:"tool_name"`
+	RuleContent string `json:"rule_content,omitempty"`
+}
+
+// Permission behaviors.
 const (
 	PermissionAllow = "allow"
 	PermissionDeny  = "deny"
 	PermissionAsk   = "ask"
+)
+
+// Permission update types.
+const (
+	PermissionUpdateAddRules    = "addRules"
+	PermissionUpdateRemoveRules = "removeRules"
+)
+
+// Permission destinations for PermissionUpdate.Destination.
+const (
+	PermissionDestinationLocal   = "localSettings"
+	PermissionDestinationProject = "projectSettings"
+	PermissionDestinationUser    = "userSettings"
+	PermissionDestinationSession = "session"
 )
 
 // ValidationResult represents the outcome of input validation.
@@ -109,7 +150,7 @@ type ValidationResult struct {
 
 // PromptOptions are passed to Tool.Prompt() for context-aware descriptions.
 type PromptOptions struct {
-	Tools               []Tool
+	Tools                 []Tool
 	ToolPermissionContext *agents.ToolPermissionContext
 }
 
@@ -120,12 +161,12 @@ type PromptOptions struct {
 // ToolDefaults provides safe default implementations for optional Tool methods.
 type ToolDefaults struct{}
 
-func (d ToolDefaults) Aliases() []string                                         { return nil }
-func (d ToolDefaults) IsConcurrencySafe(_ json.RawMessage) bool                  { return false }
-func (d ToolDefaults) IsReadOnly(_ json.RawMessage) bool                         { return false }
-func (d ToolDefaults) IsDestructive(_ json.RawMessage) bool                      { return false }
-func (d ToolDefaults) IsEnabled() bool                                            { return true }
-func (d ToolDefaults) MaxResultSizeChars() int                                    { return 100000 }
+func (d ToolDefaults) Aliases() []string                        { return nil }
+func (d ToolDefaults) IsConcurrencySafe(_ json.RawMessage) bool { return false }
+func (d ToolDefaults) IsReadOnly(_ json.RawMessage) bool        { return false }
+func (d ToolDefaults) IsDestructive(_ json.RawMessage) bool     { return false }
+func (d ToolDefaults) IsEnabled() bool                          { return true }
+func (d ToolDefaults) MaxResultSizeChars() int                  { return 100000 }
 func (d ToolDefaults) ValidateInput(_ json.RawMessage, _ *agents.ToolUseContext) *ValidationResult {
 	return &ValidationResult{Valid: true}
 }

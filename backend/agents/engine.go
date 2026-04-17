@@ -195,15 +195,16 @@ func (e *QueryEngine) runQuery(ctx context.Context, prompt string, ch chan<- Str
 
 	// 5. Build query params (TS L675-686)
 	params := QueryParams{
-		Messages:       messages,
-		SystemPrompt:   systemPrompt,
-		UserContext:    userContext,
-		SystemContext:  systemContext,
-		ToolUseContext: toolCtx,
-		QuerySource:    "sdk",
-		MaxTurns:       e.config.MaxTurns,
-		TaskBudget:     e.config.TaskBudget,
-		FallbackModel:  e.config.FallbackModel,
+		Messages:          messages,
+		SystemPrompt:      systemPrompt,
+		UserContext:       userContext,
+		SystemContext:     systemContext,
+		ToolUseContext:    toolCtx,
+		QuerySource:       "sdk",
+		MaxTurns:          e.config.MaxTurns,
+		TaskBudget:        e.config.TaskBudget,
+		FallbackModel:     e.config.FallbackModel,
+		OnCompactBoundary: e.config.OnCompactBoundary,
 	}
 
 	// 6. Run the query loop — collect events on an internal channel,
