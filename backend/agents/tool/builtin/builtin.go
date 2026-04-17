@@ -4,7 +4,23 @@
 package builtin
 
 import (
+	"runtime"
+
 	"github.com/wall-ai/ubuilding/backend/agents/tool"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/agenttool"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/askuser"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/bash"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/bg"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/brief"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/fileio"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/glob"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/grep"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/mcp"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/notebook"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/planmode"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/powershell"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/taskgraph"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/todo"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/webfetch"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/websearch"
 )
@@ -18,6 +34,19 @@ type Options struct {
 	WebSearchBaseURL string
 	// WebFetchOptions are passed through to webfetch.New.
 	WebFetchOptions []webfetch.Option
+	// WorkspaceRoots restricts file-oriented tools (Read/Edit/Write/NotebookEdit)
+	// to paths inside one of the listed absolute roots. Empty = no restriction.
+	WorkspaceRoots []string
+	// BashOptions customises the Bash (unix) tool.
+	BashOptions []bash.Option
+	// PowerShellOptions customises the PowerShell (windows) tool.
+	PowerShellOptions []powershell.Option
+	// AgentToolOptions customises the AgentTool / Task subagent.
+	AgentToolOptions []agenttool.Option
+	// DisableBashAlias, when true, skips aliasing the Windows PowerShell tool
+	// as "Bash"; the platform-specific name ("PowerShell") is advertised
+	// instead.
+	DisableBashAlias bool
 }
 
 // Tools returns the default built-in tool set.
@@ -38,4 +67,67 @@ func Register(r *tool.Registry, opts ...Options) {
 	for _, t := range Tools(opts...) {
 		r.Register(t, tool.WithBuiltin())
 	}
+}
+
+// AllTools returns the complete ported tool set: WebSearch, WebFetch, Read,
+// Edit, Write, NotebookEdit, Glob, Grep, Bash/PowerShell (platform-routed),
+// TodoWrite, AskUserQuestion, ExitPlanMode, the bg-shell tools (TaskOutput /
+// TaskStop), the TodoV2 task-graph tools (TaskCreate / TaskGet / TaskUpdate /
+// TaskList), and the Task subagent tool.
+func AllTools(opts ...Options) tool.Tools {
+	var o Options
+	if len(opts) > 0 {
+		o = opts[0]
+	}
+	ts := tool.Tools{
+		websearch.New(o.WebSearchAPIKey, o.WebSearchBaseURL),
+		webfetch.New(o.WebFetchOptions...),
+		fileio.NewReadTool(o.WorkspaceRoots...),
+		fileio.NewEditTool(o.WorkspaceRoots...),
+		fileio.NewWriteTool(o.WorkspaceRoots...),
+		notebook.New(o.WorkspaceRoots...),
+		glob.New(),
+		grep.New(),
+		todo.New(),
+		askuser.New(),
+		planmode.New(),
+		planmode.NewEnter(),
+		// BriefTool = SendUserMessage; host wires EventBrief to its UI.
+		brief.New(),
+		// MCP resource tools (nil-safe — they error cleanly without a registry).
+		mcp.NewListTool(),
+		mcp.NewReadTool(),
+		// Background-shell tools.
+		bg.NewOutputTool(),
+		bg.NewStopTool(),
+		// TodoV2 task-graph CRUD (TaskStop is the shared bg.StopTool above).
+		taskgraph.NewCreateTool(),
+		taskgraph.NewGetTool(),
+		taskgraph.NewUpdateTool(),
+		taskgraph.NewListTool(),
+		agenttool.New(o.AgentToolOptions...),
+	}
+	ts = append(ts, shellTool(o))
+	return ts
+}
+
+// RegisterAll installs the complete ported tool set into r.
+func RegisterAll(r *tool.Registry, opts ...Options) {
+	for _, t := range AllTools(opts...) {
+		r.Register(t, tool.WithBuiltin())
+	}
+}
+
+// shellTool returns the platform-appropriate shell tool. On Windows the
+// PowerShell tool is aliased to "Bash" by default so model prompts stay
+// platform-agnostic; set Options.DisableBashAlias=true to keep "PowerShell".
+func shellTool(o Options) tool.Tool {
+	if runtime.GOOS == "windows" {
+		psOpts := o.PowerShellOptions
+		if !o.DisableBashAlias {
+			psOpts = append([]powershell.Option{powershell.WithAlias("Bash")}, psOpts...)
+		}
+		return powershell.New(psOpts...)
+	}
+	return bash.New(o.BashOptions...)
 }

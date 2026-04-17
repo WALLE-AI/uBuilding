@@ -75,9 +75,54 @@ type ToolUseContext struct {
 	// SetResponseLength callback for tracking response length.
 	SetResponseLength func(length int)
 
+	// AskUser is invoked by the AskUserQuestion tool. Hosts provide this
+	// callback (CLI/UI/tests) to collect the user's answer. Returning an
+	// error propagates back to the model as a tool failure.
+	AskUser func(ctx context.Context, payload AskUserPayload) (AskUserResponse, error)
+
+	// PlanMode tracks the current plan/normal mode. Mutated by the
+	// EnterPlanMode / ExitPlanMode tools. Empty string == "normal".
+	PlanMode string
+
+	// EmitEvent, when non-nil, lets tools surface ancillary StreamEvents
+	// (EventAskUser, EventPlanModeChange, …) through the engine's event pipe.
+	// Hosts wire this to their internal event channel; nil = best-effort drop.
+	EmitEvent func(StreamEvent)
+
+	// TodoStore exposes a session-scoped todo list for the TodoWrite tool.
+	// The engine sets this during bootstrap; nil means the tool is disabled.
+	TodoStore interface{} // *tool/todo.Store, kept as interface{} to avoid import cycle
+
+	// TaskManager is the background-shell job manager used by TaskOutput /
+	// TaskStop / Bash (run_in_background). Typically a `*bg.Manager`.
+	// Kept as interface{} to avoid import cycles.
+	TaskManager interface{}
+
+	// TaskGraph is the TodoV2 task-graph store used by the TaskCreate /
+	// TaskGet / TaskUpdate / TaskList / TaskStop tools. Typically a
+	// `*taskgraph.Store`. Kept as interface{} to avoid import cycles.
+	TaskGraph interface{}
+
+	// SpawnSubAgent, when non-nil, launches a subagent query and returns its
+	// final textual answer. Wired by the engine; used by AgentTool.
+	SpawnSubAgent func(ctx context.Context, params SubAgentParams) (string, error)
+
+	// McpResources, when non-nil, exposes MCP-resource discovery & read access
+	// to the ListMcpResources / ReadMcpResource tools. Hosts wire this to
+	// their MCP client pool; nil = tool calls error out with "no MCP registry".
+	McpResources McpResourceRegistry
+
 	// InProgressToolUseIDs tracks currently executing tool IDs.
 	inProgressMu         sync.Mutex
 	inProgressToolUseIDs map[string]struct{}
+}
+
+// SubAgentParams configures a subagent query spawned via SpawnSubAgent.
+type SubAgentParams struct {
+	Description  string
+	Prompt       string
+	SubagentType string
+	MaxTurns     int
 }
 
 // ToolUseOptions holds engine-level configuration accessible during tool execution.
@@ -199,6 +244,45 @@ type MCPTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	ServerName  string `json:"server_name"`
+}
+
+// McpResource is a single MCP resource advertised by a connected server.
+// Maps to the `resources/list` item in the MCP spec.
+type McpResource struct {
+	URI         string `json:"uri"`
+	Name        string `json:"name"`
+	MimeType    string `json:"mimeType,omitempty"`
+	Description string `json:"description,omitempty"`
+	Server      string `json:"server"`
+}
+
+// McpResourceContent is a single content chunk returned by `resources/read`.
+// Either Text or BlobSavedTo (filesystem path) is populated; never both.
+type McpResourceContent struct {
+	URI         string `json:"uri"`
+	MimeType    string `json:"mimeType,omitempty"`
+	Text        string `json:"text,omitempty"`
+	BlobSavedTo string `json:"blobSavedTo,omitempty"`
+}
+
+// McpResourceRegistry is the minimal surface the ListMcpResources /
+// ReadMcpResource tools use. Hosts with a real MCP client pool implement this;
+// tests pass a fake. Returning an empty slice for an unknown server is NOT
+// allowed — the implementation must return an error so the tool can surface
+// "server not found".
+type McpResourceRegistry interface {
+	// ListServers reports the names of connected MCP servers.
+	ListServers() []string
+
+	// ListResources returns resources advertised by the named server. When
+	// server == "" the caller wants resources from ALL connected servers
+	// flattened (one round-trip per server, results concatenated).
+	ListResources(ctx context.Context, server string) ([]McpResource, error)
+
+	// ReadResource fetches the contents of a resource by URI from a named
+	// server. Binary blobs SHOULD be persisted to disk by the implementation
+	// and surfaced via McpResourceContent.BlobSavedTo.
+	ReadResource(ctx context.Context, server, uri string) ([]McpResourceContent, error)
 }
 
 // FileHistoryState tracks file modification history for undo/redo.

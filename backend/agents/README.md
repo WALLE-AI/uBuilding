@@ -30,9 +30,12 @@ User Input → QueryEngine.SubmitMessage()
 | `agents` | Core engine: `QueryEngine`, `QueryLoop`, types, deps, config, budget, hooks |
 | `agents/provider` | LLM adapters: Anthropic (official SDK), OpenAI-compatible (Ollama/vLLM/GPT) |
 | `agents/tool` | Tool system: `Tool` interface, `BuildTool` factory, `Registry`, `AssembleToolPool`, `FilterByDenyRules`, `Orchestrator`, `StreamingToolExecutor` |
-| `agents/tool/builtin` | Built-in tool set (`WebSearch`, `WebFetch`). Install via `builtin.Register(registry)` — tools are tagged `WithBuiltin()` so `AssembleToolPool` keeps them as the cache-friendly prefix |
-| `agents/tool/webfetch` | `WebFetch` tool: SSRF guard, domain blocklist, 140+ preapproved hosts, markdown-passthrough fast path, optional `SideQuerier` summarization with compliance guardrails, cross-host redirect template |
-| `agents/tool/websearch` | `WebSearch` tool: Brave API + DuckDuckGo fallback, Sources-section prompt, current-month/year injection |
+| `agents/tool/builtin` | Built-in tool aggregator. `Register(registry)` = legacy 2-tool set (`WebSearch`, `WebFetch`); `RegisterAll(registry, opts)` = full ported set (adds `Read`/`Edit`/`Write`/`NotebookEdit`/`Glob`/`Grep`/`Bash`-or-`PowerShell`/`TodoWrite`/`AskUserQuestion`/`ExitPlanMode`/`TaskStart`/`TaskStatus`/`TaskList`/`TaskKill`/`Task`-subagent). See `tool/README.md`. |
+| `agents/tool/webfetch`, `websearch` | Network tools: SSRF-guarded fetch, Brave/DuckDuckGo search. |
+| `agents/tool/fileio`, `notebook`, `glob`, `grep` | Filesystem tools. FileIO enforces an absolute-path + ReadFileState fresh-read gate; Grep prefers ripgrep with a Go regex fallback. |
+| `agents/tool/bash`, `powershell`, `shell` | Shell tools + shared cross-platform executor (timeout, truncation, tree-kill). Security: hardcoded deny patterns + read-only allowlist; anything else falls to Ask. |
+| `agents/tool/todo`, `askuser`, `planmode` | Session-state tools. `ToolUseContext` gains `TodoStore`, `AskUser`, `PlanMode`, `EmitEvent`; new `StreamEvent`s: `EventAskUser`, `EventPlanModeChange`. |
+| `agents/tool/task`, `agenttool` | Background-job manager + subagent dispatch (`ToolUseContext.SpawnSubAgent`). |
 | `agents/compact` | Context compression: `MicroCompactor` (local), `AutoCompactor` (LLM-powered) |
 | `agents/permission` | Permission chain: deny → allow → ask with glob pattern matching |
 | `agents/prompt` | System prompt builder (6-layer) + message normalization + thinking rules |

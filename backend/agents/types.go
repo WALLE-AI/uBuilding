@@ -29,7 +29,56 @@ const (
 	EventDone            EventType = "done"
 	EventCompactBoundary EventType = "compact_boundary"
 	EventMicrocompact    EventType = "microcompact_boundary"
+	EventAskUser         EventType = "ask_user"
+	EventPlanModeChange  EventType = "plan_mode_change"
+	EventBrief           EventType = "brief"
 )
+
+// BriefAttachment is a single resolved attachment surfaced to the user.
+type BriefAttachment struct {
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	IsImage  bool   `json:"is_image"`
+	FileUUID string `json:"file_uuid,omitempty"`
+}
+
+// BriefPayload carries a BriefTool message destined for the user.
+type BriefPayload struct {
+	// Message is rendered to the user (markdown-capable).
+	Message string `json:"message"`
+	// Status is either "normal" or "proactive" — see BriefTool prompt.
+	Status string `json:"status"`
+	// Attachments lists resolved attachments (paths already validated).
+	Attachments []BriefAttachment `json:"attachments,omitempty"`
+	// SentAt is an RFC3339 timestamp set at tool-execution time.
+	SentAt string `json:"sent_at,omitempty"`
+}
+
+// AskUserOption is a single selectable option rendered by a host UI.
+type AskUserOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// AskUserPayload is the question posed to the user via EventAskUser.
+type AskUserPayload struct {
+	Question      string          `json:"question"`
+	Options       []AskUserOption `json:"options,omitempty"`
+	AllowMultiple bool            `json:"allow_multiple,omitempty"`
+}
+
+// AskUserResponse is the answer returned by ToolUseContext.AskUser.
+type AskUserResponse struct {
+	Selected []string `json:"selected,omitempty"`
+	Text     string   `json:"text,omitempty"`
+}
+
+// PlanModeChange captures a transition of the engine's plan/normal mode.
+type PlanModeChange struct {
+	From    string `json:"from"`
+	To      string `json:"to"`
+	Summary string `json:"summary,omitempty"`
+}
 
 // StreamEvent is the primary streaming output unit from the engine, sent
 // through channels in place of TypeScript's AsyncGenerator yield.

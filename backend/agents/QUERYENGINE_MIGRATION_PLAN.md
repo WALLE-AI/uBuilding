@@ -253,6 +253,37 @@ runTools / StreamingToolExecutor
 | `hooks.go` | `toolHooks.ts` | ✅ |
 | `api_schema.go` | `utils/api.ts` toolToAPISchema | ✅ |
 
+### 2.6.1 Built-in Tool Set (`tool/<pkg>/` — 15 tools) ✅
+
+Ports the claude-code-main user-facing tool surface. Aggregated by
+`builtin.AllTools` / `builtin.RegisterAll`. See `agents/tool/README.md`.
+
+| Package | Tool(s) | TS source | Status |
+|---------|---------|-----------|--------|
+| `websearch` | `WebSearch` | `tools/WebSearchTool` | ✅ (pre-existing) |
+| `webfetch` | `WebFetch` | `tools/WebFetchTool` | ✅ (pre-existing) |
+| `shell` | — (executor) | shared bash runner | ✅ |
+| `bash` | `Bash` | `tools/BashTool` | ✅ (unix; deny+allow lists) |
+| `powershell` | `PowerShell` (aliased to `Bash` on Windows) | `tools/BashTool` on Windows path | ✅ |
+| `fileio` | `Read`, `Edit`, `Write` | `tools/FileReadTool`, `FileEditTool`, `FileWriteTool` | ✅ (ReadFileState gate) |
+| `notebook` | `NotebookEdit` | `tools/NotebookEditTool` | ✅ (replace+insert; no delete) |
+| `glob` | `Glob` | `tools/GlobTool` | ✅ (native Go) |
+| `grep` | `Grep` | `tools/GrepTool` | ✅ (rg primary + Go fallback via pluggable `Locator`) |
+| `todo` | `TodoWrite` | `tools/TodoWriteTool` | ✅ (session `Store`) |
+| `askuser` | `AskUserQuestion` | `tools/AskUserQuestionTool` | ✅ (emits `EventAskUser`) |
+| `planmode` | `ExitPlanMode` | `tools/ExitPlanModeTool` | ✅ (emits `EventPlanModeChange`) |
+| `task` | `TaskStart`, `TaskStatus`, `TaskList`, `TaskKill` | background-job tools | ✅ (`Manager`-backed) |
+| `agenttool` | `Task` (subagent) | `tools/TaskTool` | ✅ (via `ToolUseContext.SpawnSubAgent`) |
+| `builtin` | — (aggregator) | tool registry wiring | ✅ |
+
+**Related `ToolUseContext` extensions** (see `tool_use_context.go`):
+`AskUser`, `EmitEvent`, `PlanMode`, `TodoStore`, `TaskManager`,
+`SpawnSubAgent`. New `StreamEvent` types: `EventAskUser`, `EventPlanModeChange`.
+
+**Integration coverage**: `agents/tools_integration_ported_test.go` exercises
+the full `AllTools` set through the same `ExecuteTools` bridge the engine
+uses at runtime (no LLM required).
+
 ### 2.7 Compact Pipeline (`compact/` — 9 files) ✅
 
 | File | TS Equivalent | Status |
