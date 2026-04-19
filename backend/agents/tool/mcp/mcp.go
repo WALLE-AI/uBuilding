@@ -52,14 +52,29 @@ func (t *ListTool) InputSchema() *tool.JSONSchema {
 	}
 }
 
-func (t *ListTool) Description(_ json.RawMessage) string { return "List MCP resources" }
+func (t *ListTool) Description(_ json.RawMessage) string {
+	// Mirrors ListMcpResourcesTool/prompt.ts DESCRIPTION.
+	return `
+Lists available resources from configured MCP servers.
+Each resource object includes a 'server' field indicating which server it's from.
+
+Usage examples:
+- List all resources from all servers: ` + "`listMcpResources`" + `
+- List resources from a specific server: ` + "`listMcpResources({ server: \"myserver\" })`" + `
+`
+}
 
 func (t *ListTool) Prompt(_ tool.PromptOptions) string {
-	return `Lists resources advertised by connected MCP servers.
+	// Mirrors ListMcpResourcesTool/prompt.ts PROMPT.
+	return `
+List available resources from configured MCP servers.
+Each returned resource will include all standard MCP resource fields plus a 'server' field 
+indicating which server the resource belongs to.
 
-- Pass "server" to scope results to a single server; omit it to aggregate.
-- Returns [] when no resources exist; MCP servers may still provide tools.
-- This tool is read-only and concurrency-safe.`
+Parameters:
+- server (optional): The name of a specific MCP server to get resources from. If not provided,
+  resources from all servers will be returned.
+`
 }
 
 func (t *ListTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
@@ -145,14 +160,27 @@ func (t *ReadTool) InputSchema() *tool.JSONSchema {
 	}
 }
 
-func (t *ReadTool) Description(_ json.RawMessage) string { return "Read a specific MCP resource" }
+func (t *ReadTool) Description(_ json.RawMessage) string {
+	// Mirrors ReadMcpResourceTool/prompt.ts DESCRIPTION.
+	return `
+Reads a specific resource from an MCP server.
+- server: The name of the MCP server to read from
+- uri: The URI of the resource to read
+
+Usage examples:
+- Read a resource from a server: ` + "`readMcpResource({ server: \"myserver\", uri: \"my-resource-uri\" })`" + `
+`
+}
 
 func (t *ReadTool) Prompt(_ tool.PromptOptions) string {
-	return `Reads a specific MCP resource by server name + URI.
+	// Mirrors ReadMcpResourceTool/prompt.ts PROMPT.
+	return `
+Reads a specific resource from an MCP server, identified by server name and resource URI.
 
-- Returns text content inline; binary blobs are persisted to disk by the host
-  and surfaced via blobSavedTo (with a short human-readable note in text).
-- Use ListMcpResources first to discover valid URIs.`
+Parameters:
+- server (required): The name of the MCP server from which to read the resource
+- uri (required): The URI of the resource to read
+`
 }
 
 func (t *ReadTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

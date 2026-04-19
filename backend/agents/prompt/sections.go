@@ -5,6 +5,59 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// CrossRef — tool name interpolation for per-tool Prompt() text.
+//
+// TypeScript prompt templates refer to peer tools through compile-time
+// constants (e.g. `BASH_TOOL_NAME`, `FILE_READ_TOOL_NAME`). In Go we can
+// not use compile-time cross-package constants without circular imports,
+// so the Prompt() text carries a "primary" tool name and calls
+// CrossRef(ResolveFn, "Bash") to resolve the actual name that ended up
+// in the registry. This lets hosts rename tools (e.g. to avoid collisions
+// with MCP tools) without drifting the prompt text out of sync.
+//
+// ResolveFn is supplied by the caller (the tool registry) and returns
+// the currently-registered name for a primary. When the tool is not
+// registered (disabled / denied) the ResolveFn returns "" and CrossRef
+// falls back to the primary name so the prompt still reads naturally.
+// ---------------------------------------------------------------------------
+
+// ResolveFn maps a primary tool name to its registered name or "" when
+// the tool is unavailable.
+type ResolveFn func(primary string) string
+
+// CrossRef returns the preferred name for referencing `primary` inside
+// another tool's prompt. When resolve is nil or returns "" (tool absent)
+// CrossRef falls back to `primary`.
+func CrossRef(resolve ResolveFn, primary string) string {
+	if resolve == nil {
+		return primary
+	}
+	if got := resolve(primary); got != "" {
+		return got
+	}
+	return primary
+}
+
+// ToolListResolveFn produces a ResolveFn from a slice of tool-name
+// strings; a primary is considered registered when the slice contains it
+// verbatim. Useful when the caller already owns a resolved Tools slice.
+func ToolListResolveFn(names []string) ResolveFn {
+	if len(names) == 0 {
+		return func(string) string { return "" }
+	}
+	set := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		set[n] = struct{}{}
+	}
+	return func(primary string) string {
+		if _, ok := set[primary]; ok {
+			return primary
+		}
+		return ""
+	}
+}
+
+// ---------------------------------------------------------------------------
 // SystemPromptSection — memoized section cache mechanism
 // Maps to constants/systemPromptSections.ts
 // ---------------------------------------------------------------------------

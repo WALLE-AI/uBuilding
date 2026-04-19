@@ -52,19 +52,7 @@ func (t *EnterTool) Description(_ json.RawMessage) string {
 	return "Requests permission to enter plan mode for complex tasks requiring exploration and design"
 }
 
-func (t *EnterTool) Prompt(_ tool.PromptOptions) string {
-	return `Switches the agent into plan mode. Use this BEFORE touching files on
-non-trivial tasks where you need to:
-  - read code to understand existing patterns,
-  - weigh trade-offs across multiple approaches,
-  - or surface a concrete design for the user to approve.
-
-Rules:
-- Plan mode is read-only. Do not edit files until you have called ExitPlanMode.
-- Subagents (ToolUseContext.AgentID != "") cannot enter plan mode — call this
-  from the main thread only.
-- The engine refuses the call if you are already in plan mode.`
-}
+func (t *EnterTool) Prompt(opts tool.PromptOptions) string { return buildEnterPrompt(opts) }
 
 func (t *EnterTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	if len(input) == 0 {

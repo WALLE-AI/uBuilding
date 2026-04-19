@@ -41,11 +41,11 @@ type Match struct {
 
 // Output is the structured result.
 type Output struct {
-	Pattern  string  `json:"pattern"`
-	Path     string  `json:"path"`
-	Matches  []Match `json:"matches"`
-	Count    int     `json:"count"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Pattern   string  `json:"pattern"`
+	Path      string  `json:"path"`
+	Matches   []Match `json:"matches"`
+	Count     int     `json:"count"`
+	Truncated bool    `json:"truncated,omitempty"`
 }
 
 // Tool implements tool.Tool.
@@ -56,10 +56,10 @@ type Tool struct {
 // New returns a Glob tool.
 func New() *Tool { return &Tool{} }
 
-func (t *Tool) Name() string                            { return Name }
-func (t *Tool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (t *Tool) Name() string                             { return Name }
+func (t *Tool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *Tool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
-func (t *Tool) MaxResultSizeChars() int                 { return 100_000 }
+func (t *Tool) MaxResultSizeChars() int                  { return 100_000 }
 
 func (t *Tool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -81,17 +81,15 @@ func (t *Tool) Description(input json.RawMessage) string {
 	return "Glob " + in.Pattern
 }
 
-func (t *Tool) Prompt(_ tool.PromptOptions) string {
-	return `Finds files matching a glob pattern. Results are sorted newest first.
-
-Patterns:
-- "**/*.go" — all Go files recursively.
-- "src/*.ts" — TS files in src (no recursion).
-- "**/foo?.txt" — question mark matches exactly one char.
-
-Notes:
-- path defaults to the engine's working directory.
-- Returns at most ` + fmt.Sprintf("%d", MaxResults) + ` matches; refine the pattern if truncated.`
+func (t *Tool) Prompt(opts tool.PromptOptions) string {
+	agentRef := resolvePeer(opts, "Task")
+	return `- Fast file pattern matching tool that works with any codebase size
+- Supports glob patterns like "**/*.js" or "src/**/*.ts"
+- Returns matching file paths sorted by modification time (newest first)
+- Use this tool when you need to find files by name patterns
+- When you are doing an open ended search that may require multiple rounds of globbing and grepping, use the ` + agentRef + ` tool instead
+- path defaults to the engine's working directory; pattern must not be empty
+- Returns at most ` + fmt.Sprintf("%d", MaxResults) + ` matches; refine the pattern if truncated`
 }
 
 func (t *Tool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
@@ -237,7 +235,7 @@ var errStopWalk = errors.New("glob: max results reached")
 // "**" matches zero or more path segments; other segments are matched via
 // path.Match on individual components.
 type segMatcher struct {
-	raw       string
+	raw        string
 	doubleStar bool
 }
 

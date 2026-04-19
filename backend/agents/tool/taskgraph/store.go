@@ -34,16 +34,27 @@ var ValidStatuses = map[string]struct{}{
 	StatusFailed:     {},
 }
 
-// Node is a single task in the graph.
+// Node is a single task in the graph. Fields mirror claude-code-main's
+// TaskCreate/TaskUpdate/TaskGet surface:
+//
+//   - Title       maps to upstream "subject" (imperative task title)
+//   - Description maps to upstream "description" (long-form detail)
+//   - ActiveForm  maps to upstream "activeForm" (present-continuous label)
+//   - Owner       maps to upstream "owner" (agent id or empty = unowned)
+//   - DependsOn   maps to upstream "blockedBy" (ids that must resolve first)
+//   - Payload     maps to upstream "metadata" (free-form string→string map)
 type Node struct {
-	ID        string            `json:"id"`
-	Title     string            `json:"title"`
-	Status    string            `json:"status"`
-	ParentID  string            `json:"parent_id,omitempty"`
-	DependsOn []string          `json:"depends_on,omitempty"`
-	Payload   map[string]string `json:"payload,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	ID          string            `json:"id"`
+	Title       string            `json:"title"`
+	Description string            `json:"description,omitempty"`
+	ActiveForm  string            `json:"activeForm,omitempty"`
+	Status      string            `json:"status"`
+	Owner       string            `json:"owner,omitempty"`
+	ParentID    string            `json:"parent_id,omitempty"`
+	DependsOn   []string          `json:"depends_on,omitempty"`
+	Payload     map[string]string `json:"payload,omitempty"`
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
 // Store is a concurrency-safe task-graph repository.
@@ -110,11 +121,14 @@ func (s *Store) Get(id string) (Node, bool) {
 // UpdateFields describes the subset of fields an Update call may change.
 // Nil pointers mean "leave unchanged".
 type UpdateFields struct {
-	Title     *string
-	Status    *string
-	ParentID  *string
-	DependsOn *[]string
-	Payload   *map[string]string
+	Title       *string
+	Description *string
+	ActiveForm  *string
+	Status      *string
+	Owner       *string
+	ParentID    *string
+	DependsOn   *[]string
+	Payload     *map[string]string
 }
 
 // Update applies patches to a node. Returns the updated snapshot.
@@ -131,6 +145,15 @@ func (s *Store) Update(id string, patch UpdateFields) (Node, error) {
 			return Node{}, errors.New("taskgraph: title must not be empty")
 		}
 		n.Title = *patch.Title
+	}
+	if patch.Description != nil {
+		n.Description = *patch.Description
+	}
+	if patch.ActiveForm != nil {
+		n.ActiveForm = *patch.ActiveForm
+	}
+	if patch.Owner != nil {
+		n.Owner = *patch.Owner
 	}
 	if patch.Status != nil {
 		if _, ok := ValidStatuses[*patch.Status]; !ok {

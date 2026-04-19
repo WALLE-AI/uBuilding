@@ -33,12 +33,15 @@ const (
 	PriorityLow    = "low"
 )
 
-// Item is a single todo entry.
+// Item is a single todo entry. Mirrors claude-code-main TodoWrite's schema:
+// each task carries both an imperative `content` and a present-continuous
+// `activeForm` (used by the UI while the task is in progress).
 type Item struct {
-	ID       string `json:"id"`
-	Content  string `json:"content"`
-	Status   string `json:"status"`
-	Priority string `json:"priority"`
+	ID         string `json:"id"`
+	Content    string `json:"content"`
+	ActiveForm string `json:"activeForm,omitempty"`
+	Status     string `json:"status"`
+	Priority   string `json:"priority"`
 }
 
 // Store is the session-scoped, concurrency-safe todo list.
@@ -84,36 +87,26 @@ type Tool struct {
 // New returns a TodoWrite tool.
 func New() *Tool { return &Tool{} }
 
-func (t *Tool) Name() string                            { return Name }
-func (t *Tool) IsReadOnly(_ json.RawMessage) bool       { return false }
+func (t *Tool) Name() string                             { return Name }
+func (t *Tool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (t *Tool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
 
 func (t *Tool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
 		Type: "object",
 		Properties: map[string]*tool.SchemaProperty{
-			"todos": {Type: "array", Description: "Full todo list for the current task. Replaces any prior list."},
+			"todos": {Type: "array", Description: "Full todo list for the current task. Replaces any prior list. Each item must include id, content, activeForm, status, priority."},
 		},
 		Required: []string{"todos"},
 	}
 }
 
-func (t *Tool) Description(_ json.RawMessage) string { return "Manage session todo list" }
-
-func (t *Tool) Prompt(_ tool.PromptOptions) string {
-	return `Creates or replaces the session's todo list.
-
-Each todo is an object with:
-- id: unique identifier
-- content: task description
-- status: pending | in_progress | completed
-- priority: high | medium | low
-
-Usage:
-- Call this at the start of non-trivial tasks to outline the plan.
-- Mark the task currently being worked on as "in_progress" (only one at a time).
-- Update as tasks complete. The tool replaces the entire list on each call, so always send the full updated list.`
+func (t *Tool) Description(_ json.RawMessage) string {
+	// Mirrors upstream DESCRIPTION.
+	return "Update the todo list for the current session. To be used proactively and often to track progress and pending tasks. Make sure that at least one task is in_progress at all times. Always provide both content (imperative) and activeForm (present continuous) for each task."
 }
+
+func (t *Tool) Prompt(opts tool.PromptOptions) string { return buildPrompt(opts) }
 
 func (t *Tool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in Input
@@ -139,6 +132,11 @@ func validateList(items []Item) error {
 		ids[it.ID] = true
 		if strings.TrimSpace(it.Content) == "" {
 			return fmt.Errorf("todos[%d]: content must not be empty", i)
+		}
+		// Upstream requires activeForm on every task (the UI renders it
+		// while the task is in_progress).
+		if strings.TrimSpace(it.ActiveForm) == "" {
+			return fmt.Errorf("todos[%d]: activeForm must not be empty", i)
 		}
 		switch it.Status {
 		case StatusPending, StatusInProgress, StatusCompleted:
@@ -210,7 +208,11 @@ func renderOutput(content interface{}) string {
 	var sb strings.Builder
 	sb.WriteString("Todos:\n")
 	for _, it := range items {
-		fmt.Fprintf(&sb, "- [%s] (%s) %s\n", it.Status, it.Priority, it.Content)
+		label := it.Content
+		if it.Status == StatusInProgress && strings.TrimSpace(it.ActiveForm) != "" {
+			label = it.ActiveForm
+		}
+		fmt.Fprintf(&sb, "- [%s] (%s) %s\n", it.Status, it.Priority, label)
 	}
 	return sb.String()
 }

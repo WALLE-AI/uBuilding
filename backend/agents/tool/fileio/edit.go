@@ -41,12 +41,12 @@ func NewEditTool(workspaceRoots ...string) *EditTool {
 	return &EditTool{workspaceRoots: workspaceRoots}
 }
 
-func (e *EditTool) Name() string                          { return EditName }
-func (e *EditTool) Aliases() []string                     { return []string{"FileEdit"} }
-func (e *EditTool) IsReadOnly(_ json.RawMessage) bool     { return false }
+func (e *EditTool) Name() string                             { return EditName }
+func (e *EditTool) Aliases() []string                        { return []string{"FileEdit"} }
+func (e *EditTool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (e *EditTool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
-func (e *EditTool) IsDestructive(_ json.RawMessage) bool  { return true }
-func (e *EditTool) MaxResultSizeChars() int               { return MaxResultChars }
+func (e *EditTool) IsDestructive(_ json.RawMessage) bool     { return true }
+func (e *EditTool) MaxResultSizeChars() int                  { return MaxResultChars }
 
 func (e *EditTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -70,16 +70,23 @@ func (e *EditTool) Description(input json.RawMessage) string {
 	return "Edit " + in.FilePath
 }
 
-func (e *EditTool) Prompt(_ tool.PromptOptions) string {
-	return `Performs an exact string replacement in a file.
+func (e *EditTool) Prompt(opts tool.PromptOptions) string {
+	readRef := resolvePeer(opts, "Read")
+	minimalUniquenessHint := ""
+	if opts.UserType == "ant" {
+		minimalUniquenessHint = "\n- Use the smallest old_string that's clearly unique — usually 2-4 adjacent lines is sufficient. Avoid including 10+ lines of context when less uniquely identifies the target."
+	}
+	return `Performs exact string replacements in files.
 
-Rules:
-- file_path MUST be absolute.
-- old_string MUST appear exactly once in the file unless replace_all=true.
-- old_string and new_string MUST be different (no-op edits are rejected).
-- Before editing an existing file, the tool requires a prior Read of the same file; if the file has changed on disk since the Read, the edit is rejected.
-- To create a new file, pass an empty old_string and the full new file contents as new_string.
-- Parent directories are created automatically for new files.`
+Usage:
+- You must use your ` + "`" + readRef + "`" + ` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file. 
+- When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string.
+- ALWAYS prefer editing existing files in the codebase. NEVER write new files unless explicitly required.
+- Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
+- The edit will FAIL if ` + "`old_string`" + ` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use ` + "`replace_all`" + ` to change every instance of ` + "`old_string`" + `.` + minimalUniquenessHint + `
+- Use ` + "`replace_all`" + ` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
+- To create a new file, pass an empty old_string and the full new file contents as new_string; parent directories are created automatically.
+- The edit will FAIL if ` + "`old_string`" + ` and ` + "`new_string`" + ` are identical (no-op edits are rejected).`
 }
 
 func (e *EditTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

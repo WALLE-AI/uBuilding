@@ -94,12 +94,13 @@ func TestAgentTool_PromptIncludesAgentCatalog(t *testing.T) {
 	}
 }
 
-// A10 · No catalog installed → prompt still renders without the listing.
+// A10 · No catalog installed → prompt still renders the base description and
+// the empty "Available agent types" header (matches upstream prompt.ts).
 func TestAgentTool_PromptWithoutCatalog(t *testing.T) {
 	at := New()
 	got := at.Prompt(tool.PromptOptions{})
-	if strings.Contains(got, "Available agent types") {
-		t.Fatal("agent listing leaked without catalog")
+	if !strings.Contains(got, "Available agent types and the tools they have access to:") {
+		t.Fatal("header missing: upstream always prints it, even with empty list")
 	}
 	if !strings.Contains(got, "Task tool launches specialized agents") {
 		t.Fatal("base description lost")

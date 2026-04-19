@@ -5,8 +5,29 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/wall-ai/ubuilding/backend/agents/tool"
 )
+
+func TestGrep_PromptKeywords(t *testing.T) {
+	p := New().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"ripgrep",
+		"ALWAYS use Grep",
+		"NEVER invoke `grep`",
+		"full regex syntax",
+		"glob parameter",
+		"files_with_matches",
+		"open-ended searches",
+		"literal braces",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("Grep.Prompt() missing %q\n----\n%s", want, p)
+		}
+	}
+}
 
 func mktree(t *testing.T, files map[string]string) string {
 	t.Helper()
@@ -23,9 +44,9 @@ func mktree(t *testing.T, files map[string]string) string {
 
 func TestGrep_GoFallback_Content(t *testing.T) {
 	dir := mktree(t, map[string]string{
-		"a.go":     "package a\n\nfunc Foo() {}\n",
-		"b.go":     "package b\n\nfunc Bar() {}\n",
-		"c.md":     "no match here\n",
+		"a.go": "package a\n\nfunc Foo() {}\n",
+		"b.go": "package b\n\nfunc Bar() {}\n",
+		"c.md": "no match here\n",
 	})
 	g := New().WithLocator(NoopLocator{})
 	raw, _ := json.Marshal(Input{Pattern: "^func ", Path: dir, ShowLineNumbers: true, Glob: "**/*.go"})

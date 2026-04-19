@@ -26,13 +26,18 @@ const (
 // TaskCreate
 // ──────────────────────────────────────────────────────────────────────────
 
-// CreateInput is the TaskCreate input.
+// CreateInput is the TaskCreate input. Mirrors claude-code-main's TaskCreate
+// schema field names (title/description/activeForm/owner/metadata) with the
+// Go store's additional parent/dependency affordances.
 type CreateInput struct {
-	Title     string            `json:"title"`
-	Status    string            `json:"status,omitempty"`
-	ParentID  string            `json:"parent_id,omitempty"`
-	DependsOn []string          `json:"depends_on,omitempty"`
-	Payload   map[string]string `json:"payload,omitempty"`
+	Title       string            `json:"title"`
+	Description string            `json:"description,omitempty"`
+	ActiveForm  string            `json:"activeForm,omitempty"`
+	Status      string            `json:"status,omitempty"`
+	Owner       string            `json:"owner,omitempty"`
+	ParentID    string            `json:"parent_id,omitempty"`
+	DependsOn   []string          `json:"depends_on,omitempty"`
+	Payload     map[string]string `json:"payload,omitempty"`
 }
 
 // CreateTool implements tool.Tool for TaskCreate.
@@ -41,37 +46,32 @@ type CreateTool struct{ tool.ToolDefaults }
 // NewCreateTool returns a TaskCreate tool.
 func NewCreateTool() *CreateTool { return &CreateTool{} }
 
-func (t *CreateTool) Name() string                            { return CreateName }
-func (t *CreateTool) IsReadOnly(_ json.RawMessage) bool       { return false }
+func (t *CreateTool) Name() string                             { return CreateName }
+func (t *CreateTool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (t *CreateTool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
 
 func (t *CreateTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
 		Type: "object",
 		Properties: map[string]*tool.SchemaProperty{
-			"title":      {Type: "string", Description: "Task title."},
-			"status":     {Type: "string", Description: "Initial status (default: pending)."},
-			"parent_id":  {Type: "string", Description: "Parent task id."},
-			"depends_on": {Type: "array", Description: "Task ids this task depends on."},
-			"payload":    {Type: "object", Description: "Arbitrary string metadata."},
+			"title":       {Type: "string", Description: "Imperative task title (upstream \"subject\"), e.g. \"Fix authentication bug\"."},
+			"description": {Type: "string", Description: "Long-form description of what needs to be done."},
+			"activeForm":  {Type: "string", Description: "Present-continuous label shown in the spinner while in_progress, e.g. \"Fixing authentication bug\". If omitted, the title is reused."},
+			"status":      {Type: "string", Description: "Initial status (default: pending)."},
+			"owner":       {Type: "string", Description: "Optional agent id to claim the task at creation time."},
+			"parent_id":   {Type: "string", Description: "Parent task id."},
+			"depends_on":  {Type: "array", Description: "Task ids this task depends on (upstream \"blockedBy\")."},
+			"payload":     {Type: "object", Description: "Arbitrary string metadata (upstream \"metadata\")."},
 		},
 		Required: []string{"title"},
 	}
 }
 
-func (t *CreateTool) Description(_ json.RawMessage) string { return "Create a task-graph node" }
-
-func (t *CreateTool) Prompt(_ tool.PromptOptions) string {
-	return `Creates a node in the task graph (TodoV2 structured tasks with parent/dep relationships).
-
-Rules:
-- title required.
-- status defaults to "pending" (accepts pending|in_progress|blocked|completed|cancelled|failed).
-- parent_id must reference an existing node.
-- depends_on must reference existing nodes; cycles are rejected.
-
-For a flat checklist-style todo, prefer TodoWrite. Use TaskCreate when you need structured parent/child or dependency semantics.`
+func (t *CreateTool) Description(_ json.RawMessage) string {
+	return "Create a new task in the task list"
 }
+
+func (t *CreateTool) Prompt(opts tool.PromptOptions) string { return buildCreatePrompt(opts) }
 
 func (t *CreateTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in CreateInput
@@ -103,8 +103,9 @@ func (t *CreateTool) Call(_ context.Context, input json.RawMessage, toolCtx *age
 		return nil, errors.New("TaskCreate: no TaskGraph store attached to context")
 	}
 	node, err := store.Add(Node{
-		Title: in.Title, Status: in.Status, ParentID: in.ParentID,
-		DependsOn: in.DependsOn, Payload: in.Payload,
+		Title: in.Title, Description: in.Description, ActiveForm: in.ActiveForm,
+		Status: in.Status, Owner: in.Owner,
+		ParentID: in.ParentID, DependsOn: in.DependsOn, Payload: in.Payload,
 	})
 	if err != nil {
 		return nil, err
@@ -131,8 +132,8 @@ type GetTool struct{ tool.ToolDefaults }
 // NewGetTool returns a TaskGet tool.
 func NewGetTool() *GetTool { return &GetTool{} }
 
-func (t *GetTool) Name() string                            { return GetName }
-func (t *GetTool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (t *GetTool) Name() string                             { return GetName }
+func (t *GetTool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *GetTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
 
 func (t *GetTool) InputSchema() *tool.JSONSchema {
@@ -143,8 +144,10 @@ func (t *GetTool) InputSchema() *tool.JSONSchema {
 	}
 }
 
-func (t *GetTool) Description(_ json.RawMessage) string { return "Fetch a task-graph node" }
-func (t *GetTool) Prompt(_ tool.PromptOptions) string   { return "Returns a task-graph node snapshot by id." }
+func (t *GetTool) Description(_ json.RawMessage) string {
+	return "Get a task by ID from the task list"
+}
+func (t *GetTool) Prompt(_ tool.PromptOptions) string { return getPromptText }
 
 func (t *GetTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in GetInput
@@ -186,14 +189,18 @@ func (t *GetTool) MapToolResultToParam(content interface{}, toolUseID string) *a
 // ──────────────────────────────────────────────────────────────────────────
 
 // UpdateInput is the TaskUpdate input. Null/omitted fields leave the node
-// unchanged.
+// unchanged. Mirrors claude-code-main TaskUpdate (subject→title,
+// metadata→payload, blockedBy→depends_on).
 type UpdateInput struct {
-	ID        string             `json:"id"`
-	Title     *string            `json:"title,omitempty"`
-	Status    *string            `json:"status,omitempty"`
-	ParentID  *string            `json:"parent_id,omitempty"`
-	DependsOn *[]string          `json:"depends_on,omitempty"`
-	Payload   *map[string]string `json:"payload,omitempty"`
+	ID          string             `json:"id"`
+	Title       *string            `json:"title,omitempty"`
+	Description *string            `json:"description,omitempty"`
+	ActiveForm  *string            `json:"activeForm,omitempty"`
+	Status      *string            `json:"status,omitempty"`
+	Owner       *string            `json:"owner,omitempty"`
+	ParentID    *string            `json:"parent_id,omitempty"`
+	DependsOn   *[]string          `json:"depends_on,omitempty"`
+	Payload     *map[string]string `json:"payload,omitempty"`
 }
 
 // UpdateTool implements tool.Tool for TaskUpdate.
@@ -202,30 +209,33 @@ type UpdateTool struct{ tool.ToolDefaults }
 // NewUpdateTool returns a TaskUpdate tool.
 func NewUpdateTool() *UpdateTool { return &UpdateTool{} }
 
-func (t *UpdateTool) Name() string                            { return UpdateName }
-func (t *UpdateTool) IsReadOnly(_ json.RawMessage) bool       { return false }
+func (t *UpdateTool) Name() string                             { return UpdateName }
+func (t *UpdateTool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (t *UpdateTool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
 
 func (t *UpdateTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
 		Type: "object",
 		Properties: map[string]*tool.SchemaProperty{
-			"id":         {Type: "string", Description: "Task id."},
-			"title":      {Type: "string", Description: "New title (leave unset to keep)."},
-			"status":     {Type: "string", Description: "New status."},
-			"parent_id":  {Type: "string", Description: "New parent (empty string = detach)."},
-			"depends_on": {Type: "array", Description: "Replacement dependency list."},
-			"payload":    {Type: "object", Description: "Replacement payload map."},
+			"id":          {Type: "string", Description: "Task id."},
+			"title":       {Type: "string", Description: "New imperative title (upstream \"subject\")."},
+			"description": {Type: "string", Description: "Replacement description."},
+			"activeForm":  {Type: "string", Description: "Replacement present-continuous label shown in the spinner."},
+			"status":      {Type: "string", Description: "New status (pending|in_progress|blocked|completed|cancelled|failed)."},
+			"owner":       {Type: "string", Description: "New owner (empty string = unassign)."},
+			"parent_id":   {Type: "string", Description: "New parent (empty string = detach)."},
+			"depends_on":  {Type: "array", Description: "Replacement dependency list (upstream \"blockedBy\")."},
+			"payload":     {Type: "object", Description: "Replacement payload map (upstream \"metadata\")."},
 		},
 		Required: []string{"id"},
 	}
 }
 
-func (t *UpdateTool) Description(_ json.RawMessage) string { return "Update a task-graph node" }
-
-func (t *UpdateTool) Prompt(_ tool.PromptOptions) string {
-	return `Updates a subset of fields on a task-graph node. Unset / omitted fields leave the node unchanged. Cycle creation is rejected.`
+func (t *UpdateTool) Description(_ json.RawMessage) string {
+	return "Update a task in the task list"
 }
+
+func (t *UpdateTool) Prompt(_ tool.PromptOptions) string { return updatePromptText }
 
 func (t *UpdateTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in UpdateInput
@@ -257,8 +267,9 @@ func (t *UpdateTool) Call(_ context.Context, input json.RawMessage, toolCtx *age
 		return nil, errors.New("TaskUpdate: no TaskGraph store attached to context")
 	}
 	n, err := store.Update(in.ID, UpdateFields{
-		Title: in.Title, Status: in.Status, ParentID: in.ParentID,
-		DependsOn: in.DependsOn, Payload: in.Payload,
+		Title: in.Title, Description: in.Description, ActiveForm: in.ActiveForm,
+		Status: in.Status, Owner: in.Owner,
+		ParentID: in.ParentID, DependsOn: in.DependsOn, Payload: in.Payload,
 	})
 	if err != nil {
 		return nil, err
@@ -285,8 +296,8 @@ type ListTool struct{ tool.ToolDefaults }
 // NewListTool returns a TaskList tool.
 func NewListTool() *ListTool { return &ListTool{} }
 
-func (t *ListTool) Name() string                            { return ListName }
-func (t *ListTool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (t *ListTool) Name() string                             { return ListName }
+func (t *ListTool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *ListTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
 
 func (t *ListTool) InputSchema() *tool.JSONSchema {
@@ -298,8 +309,10 @@ func (t *ListTool) InputSchema() *tool.JSONSchema {
 	}
 }
 
-func (t *ListTool) Description(_ json.RawMessage) string { return "List task-graph nodes" }
-func (t *ListTool) Prompt(_ tool.PromptOptions) string   { return "Lists all task-graph nodes; optionally filter by status." }
+func (t *ListTool) Description(_ json.RawMessage) string {
+	return "List all tasks in the task list"
+}
+func (t *ListTool) Prompt(opts tool.PromptOptions) string { return buildListPrompt(opts) }
 
 func (t *ListTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in ListInput
@@ -363,6 +376,9 @@ func renderNode(content interface{}) string {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "task %s [%s] %s", n.ID, n.Status, n.Title)
+	if n.Owner != "" {
+		fmt.Fprintf(&sb, " owner=%s", n.Owner)
+	}
 	if n.ParentID != "" {
 		fmt.Fprintf(&sb, " (parent=%s)", n.ParentID)
 	}

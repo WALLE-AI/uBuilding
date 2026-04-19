@@ -3,10 +3,48 @@ package askuser
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
+	"github.com/wall-ai/ubuilding/backend/agents/tool"
 )
+
+func TestAskUser_PromptKeywords(t *testing.T) {
+	p := New().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"Gather user preferences",
+		"Clarify ambiguous instructions",
+		`select "Other" to provide custom text input`,
+		"multiSelect: true",
+		"(Recommended)",
+		"Plan mode note",
+		"ExitPlanMode",
+		"Preview feature",
+		"ASCII mockups",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("AskUser.Prompt() missing %q\n----\n%s", want, p)
+		}
+	}
+}
+
+func TestAskUser_PromptHTMLPreviewBranch(t *testing.T) {
+	md := New().Prompt(tool.PromptOptions{PreviewFormat: "markdown"})
+	html := New().Prompt(tool.PromptOptions{PreviewFormat: "html"})
+	if !strings.Contains(md, "ASCII mockups") {
+		t.Error("markdown branch must mention ASCII mockups")
+	}
+	if !strings.Contains(html, "HTML mockups") {
+		t.Error("html branch must mention HTML mockups")
+	}
+	if strings.Contains(html, "ASCII mockups") {
+		t.Error("html branch must not mention markdown-only ASCII mockups")
+	}
+	if strings.Contains(md, "self-contained HTML fragment") {
+		t.Error("markdown branch must not include the html-only instruction")
+	}
+}
 
 func TestAskUser_Validation(t *testing.T) {
 	tool := New()

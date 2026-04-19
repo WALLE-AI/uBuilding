@@ -21,9 +21,9 @@ const MaxOptions = 4
 
 // Input matches claude-code's ask_user tool shape.
 type Input struct {
-	Question      string                  `json:"question"`
-	Options       []agents.AskUserOption  `json:"options,omitempty"`
-	AllowMultiple bool                    `json:"allowMultiple,omitempty"`
+	Question      string                 `json:"question"`
+	Options       []agents.AskUserOption `json:"options,omitempty"`
+	AllowMultiple bool                   `json:"allowMultiple,omitempty"`
 }
 
 // Output is the structured result.
@@ -41,8 +41,8 @@ type Tool struct {
 // New returns an AskUserQuestion tool.
 func New() *Tool { return &Tool{} }
 
-func (t *Tool) Name() string                            { return Name }
-func (t *Tool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (t *Tool) Name() string                             { return Name }
+func (t *Tool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *Tool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
 
 func (t *Tool) InputSchema() *tool.JSONSchema {
@@ -70,17 +70,54 @@ func (t *Tool) Description(input json.RawMessage) string {
 	return "Ask: " + q
 }
 
-func (t *Tool) Prompt(_ tool.PromptOptions) string {
-	return `Asks the user a clarifying question with up to 4 predefined options.
+func (t *Tool) Prompt(opts tool.PromptOptions) string {
+	exitPlanRef := resolvePeer(opts, "ExitPlanMode")
 
-Use this when the user's intent is ambiguous and you need a choice among a small set of alternatives.
+	// Upstream `AskUserQuestionTool/prompt.ts` ends with a PREVIEW_FEATURE_PROMPT
+	// paragraph whose wording switches between markdown (default) and html
+	// when the host renders the preview panel as HTML. PromptOptions.PreviewFormat
+	// toggles which variant we emit; the zero value ("") defaults to markdown
+	// to match the upstream default.
+	previewBlock := previewSectionMarkdown
+	if strings.EqualFold(opts.PreviewFormat, "html") {
+		previewBlock = previewSectionHTML
+	}
 
-Rules:
-- Provide a concise question.
-- Provide 2–4 options (label + short description).
-- Never include "other" as an option — the user can always type a custom answer.
-- Set allowMultiple=true only when multiple selections make sense.`
+	return `Use this tool when you need to ask the user questions during execution. This allows you to:
+1. Gather user preferences or requirements
+2. Clarify ambiguous instructions
+3. Get decisions on implementation choices as you work
+4. Offer choices to the user about what direction to take.
+
+Usage notes:
+- Users will always be able to select "Other" to provide custom text input
+- Use multiSelect: true to allow multiple answers to be selected for a question
+- If you recommend a specific option, make that the first option in the list and add "(Recommended)" at the end of the label
+
+Plan mode note: In plan mode, use this tool to clarify requirements or choose between approaches BEFORE finalizing your plan. Do NOT use this tool to ask "Is my plan ready?" or "Should I proceed?" - use ` + exitPlanRef + ` for plan approval. IMPORTANT: Do not reference "the plan" in your questions (e.g., "Do you have feedback about the plan?", "Does the plan look good?") because the user cannot see the plan in the UI until you call ` + exitPlanRef + `. If you need plan approval, use ` + exitPlanRef + ` instead.
+` + previewBlock
 }
+
+const previewSectionMarkdown = `
+Preview feature:
+Use the optional ` + "`preview`" + ` field on options when presenting concrete artifacts that users need to visually compare:
+- ASCII mockups of UI layouts or components
+- Code snippets showing different implementations
+- Diagram variations
+- Configuration examples
+
+Preview content is rendered as markdown in a monospace box. Multi-line text with newlines is supported. When any option has a preview, the UI switches to a side-by-side layout with a vertical option list on the left and preview on the right. Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).
+`
+
+const previewSectionHTML = `
+Preview feature:
+Use the optional ` + "`preview`" + ` field on options when presenting concrete artifacts that users need to visually compare:
+- HTML mockups of UI layouts or components
+- Formatted code snippets showing different implementations
+- Visual comparisons or diagrams
+
+Preview content must be a self-contained HTML fragment (no <html>/<body> wrapper, no <script> or <style> tags — use inline style attributes instead). Do not use previews for simple preference questions where labels and descriptions suffice. Note: previews are only supported for single-select questions (not multiSelect).
+`
 
 func (t *Tool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in Input

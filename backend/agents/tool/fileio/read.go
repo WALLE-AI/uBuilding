@@ -57,11 +57,11 @@ func NewReadTool(workspaceRoots ...string) *ReadTool {
 	return &ReadTool{workspaceRoots: workspaceRoots}
 }
 
-func (r *ReadTool) Name() string                            { return ReadName }
-func (r *ReadTool) Aliases() []string                       { return []string{"FileRead"} }
-func (r *ReadTool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (r *ReadTool) Name() string                             { return ReadName }
+func (r *ReadTool) Aliases() []string                        { return []string{"FileRead"} }
+func (r *ReadTool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (r *ReadTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
-func (r *ReadTool) MaxResultSizeChars() int                 { return MaxResultChars }
+func (r *ReadTool) MaxResultSizeChars() int                  { return MaxResultChars }
 
 func (r *ReadTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -84,16 +84,25 @@ func (r *ReadTool) Description(input json.RawMessage) string {
 	return "Read " + in.FilePath
 }
 
-func (r *ReadTool) Prompt(_ tool.PromptOptions) string {
-	return `Reads a file from the local filesystem.
+func (r *ReadTool) Prompt(opts tool.PromptOptions) string {
+	bashRef := resolvePeer(opts, "Bash")
+	return fmt.Sprintf(`Reads a file from the local filesystem. You can access any file directly by using this tool.
+Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
 
 Usage:
-- file_path MUST be an absolute path.
-- Optional offset (1-indexed line number) and limit (max lines) let you page through large files.
-- Output is returned with 1-indexed line numbers in "cat -n" style.
-- Lines longer than ` + fmt.Sprintf("%d", MaxLineLength) + ` chars are truncated.
-- Binary files are detected and a placeholder is returned instead of raw bytes.
-- Before editing a file with Edit/Write, you SHOULD Read it first so the edit gate accepts the change.`
+- The file_path parameter must be an absolute path, not a relative path
+- By default, it reads up to %d lines starting from the beginning of the file
+- You can optionally specify a line offset and limit (especially handy for long files), but it's recommended to read the whole file by not providing these parameters
+- Results are returned using cat -n format, with line numbers starting at 1
+- Lines longer than %d characters are truncated with an ellipsis
+- This tool allows the agent to read images (e.g. PNG, JPG, etc). When reading an image file the contents are presented visually to the model.
+- PDF files (.pdf) are not yet supported; reading one returns a placeholder. Convert to text first when you need the content.
+- This tool can read Jupyter notebooks (.ipynb files); cells are concatenated in order and returned as text.
+- This tool can only read files, not directories. To read a directory, use an ls command via the %s tool.
+- Binary files are detected and a "<binary file, N bytes>" placeholder is returned instead of raw bytes.
+- If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.
+- Before editing a file with Edit/Write, you MUST Read it first in this conversation; the edit/write gate will reject the change otherwise.`,
+		DefaultReadLimit, MaxLineLength, bashRef)
 }
 
 func (r *ReadTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

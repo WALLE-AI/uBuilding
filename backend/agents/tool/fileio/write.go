@@ -37,12 +37,12 @@ func NewWriteTool(workspaceRoots ...string) *WriteTool {
 	return &WriteTool{workspaceRoots: workspaceRoots}
 }
 
-func (w *WriteTool) Name() string                          { return WriteName }
-func (w *WriteTool) Aliases() []string                     { return []string{"FileWrite"} }
-func (w *WriteTool) IsReadOnly(_ json.RawMessage) bool     { return false }
+func (w *WriteTool) Name() string                             { return WriteName }
+func (w *WriteTool) Aliases() []string                        { return []string{"FileWrite"} }
+func (w *WriteTool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (w *WriteTool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
-func (w *WriteTool) IsDestructive(_ json.RawMessage) bool  { return true }
-func (w *WriteTool) MaxResultSizeChars() int               { return MaxResultChars }
+func (w *WriteTool) IsDestructive(_ json.RawMessage) bool     { return true }
+func (w *WriteTool) MaxResultSizeChars() int                  { return MaxResultChars }
 
 func (w *WriteTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -64,14 +64,18 @@ func (w *WriteTool) Description(input json.RawMessage) string {
 	return "Write " + in.FilePath
 }
 
-func (w *WriteTool) Prompt(_ tool.PromptOptions) string {
-	return `Creates or overwrites a file.
+func (w *WriteTool) Prompt(opts tool.PromptOptions) string {
+	readRef := resolvePeer(opts, "Read")
+	editRef := resolvePeer(opts, "Edit")
+	return `Writes a file to the local filesystem.
 
-Rules:
-- file_path MUST be absolute.
-- When overwriting an existing file, the tool requires a prior Read of that file (so you know what you are replacing); if the file has changed on disk since the Read, the write is rejected.
-- Prefer Edit over Write for small changes.
-- Parent directories are created automatically.`
+Usage:
+- This tool will overwrite the existing file if there is one at the provided path.
+- If this is an existing file, you MUST use the ` + "`" + readRef + "`" + ` tool first to read the file's contents. This tool will fail if you did not read the file first.
+- Prefer the ` + editRef + ` tool for modifying existing files — it only sends the diff. Only use this tool to create new files or for complete rewrites.
+- NEVER create documentation files (*.md) or README files unless explicitly requested by the User.
+- Only use emojis if the user explicitly requests it. Avoid writing emojis to files unless asked.
+- The file_path parameter must be an absolute path, not a relative path. Parent directories are created automatically.`
 }
 
 func (w *WriteTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

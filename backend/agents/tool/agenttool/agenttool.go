@@ -147,30 +147,7 @@ func (a *AgentTool) Description(input json.RawMessage) string {
 	return "Dispatch a subagent"
 }
 
-func (a *AgentTool) Prompt(_ tool.PromptOptions) string {
-	// A10 · render the list of active agents the model can dispatch to.
-	// Format mirrors prompt.ts::formatAgentLine: "- <type>: <whenToUse> (Tools: ...)".
-	agentLines := a.renderAgentCatalog()
-
-	base := `Launch a new agent to handle complex, multi-step tasks autonomously.
-
-The Task tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.`
-
-	if agentLines != "" {
-		base += "\n\nAvailable agent types and the tools they have access to:\n" + agentLines
-	}
-	base += `
-
-When using the Task tool, specify a subagent_type parameter to select which agent type to use. If omitted, the general-purpose agent is used.
-
-Usage notes:
-- Always include a short description (3-5 words) summarizing what the agent will do.
-- When the agent is done, it will return a single message back to you. Relay the result to the user as a concise summary; the raw tool result is not shown to them.
-- Launch multiple agents concurrently by emitting several Task tool calls in one message.
-- The agent runs with its own message history; only its final textual result is returned here.`
-
-	return base
-}
+func (a *AgentTool) Prompt(opts tool.PromptOptions) string { return a.buildPrompt(opts) }
 
 // renderAgentCatalog formats the active agent registry for the Task prompt.
 // Returns "" when no catalog callback is installed (e.g. legacy tests).

@@ -84,13 +84,13 @@ func (t *WebSearchTool) SetProvider(p SearchProvider) { t.provider = p }
 
 // ── tool.Tool interface ────────────────────────────────────────────────────
 
-func (t *WebSearchTool) Name() string                          { return "WebSearch" }
-func (t *WebSearchTool) Aliases() []string                     { return nil }
-func (t *WebSearchTool) IsEnabled() bool                       { return true }
-func (t *WebSearchTool) IsReadOnly(_ json.RawMessage) bool     { return true }
+func (t *WebSearchTool) Name() string                             { return "WebSearch" }
+func (t *WebSearchTool) Aliases() []string                        { return nil }
+func (t *WebSearchTool) IsEnabled() bool                          { return true }
+func (t *WebSearchTool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *WebSearchTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
-func (t *WebSearchTool) IsDestructive(_ json.RawMessage) bool  { return false }
-func (t *WebSearchTool) MaxResultSizeChars() int               { return MaxResultChars }
+func (t *WebSearchTool) IsDestructive(_ json.RawMessage) bool     { return false }
+func (t *WebSearchTool) MaxResultSizeChars() int                  { return MaxResultChars }
 
 func (t *WebSearchTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -117,8 +117,11 @@ func (t *WebSearchTool) Description(input json.RawMessage) string {
 	return "Search the web: " + q
 }
 
-func (t *WebSearchTool) Prompt(_ tool.PromptOptions) string {
-	currentMonthYear := time.Now().Format("January 2006")
+func (t *WebSearchTool) Prompt(opts tool.PromptOptions) string {
+	currentMonthYear := opts.MonthYear
+	if currentMonthYear == "" {
+		currentMonthYear = time.Now().Format("January 2006")
+	}
 	return fmt.Sprintf(`- Allows the agent to search the web and use the results to inform responses
 - Provides up-to-date information for current events and recent data
 - Returns search result information formatted as search result blocks, including links as markdown hyperlinks

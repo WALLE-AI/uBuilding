@@ -83,17 +83,43 @@ func (t *Tool) Description(_ json.RawMessage) string {
 	return "Send a message to the user (primary visible output channel)"
 }
 
-func (t *Tool) Prompt(_ tool.PromptOptions) string {
-	return `Send a message to the user. This is your primary visible output channel in
-chat / assistant mode.
+func (t *Tool) Prompt(_ tool.PromptOptions) string { return ToolPrompt }
 
-Rules:
-- message is the text shown to the user (markdown-capable).
-- status = "normal" when replying to the user's last turn; "proactive" when
-  you are surfacing something unsolicited (task completion, blocker, status).
-- attachments is an optional list of ABSOLUTE file paths for the UI to render
-  alongside your message (images, diffs, logs, screenshots).
-- This tool is read-only and concurrency-safe.`
+// ToolPrompt mirrors upstream BRIEF_TOOL_PROMPT
+// (opensource/claude-code-main/src/tools/BriefTool/prompt.ts).
+const ToolPrompt = "Send a message the user will read. Text outside this tool is visible in the detail view, but most won't open it — the answer lives here.\n\n" +
+	"`message` supports markdown. `attachments` takes file paths (absolute or cwd-relative) for images, diffs, logs.\n\n" +
+	"`status` labels intent: 'normal' when replying to what they just asked; 'proactive' when you're initiating — a scheduled task finished, a blocker surfaced during background work, you need input on something they haven't asked about. Set it honestly; downstream routing uses it."
+
+// ProactiveSection returns the BRIEF_PROACTIVE_SECTION block callers can
+// splice into the system prompt. It mirrors BRIEF_PROACTIVE_SECTION in
+// prompt.ts and references whichever name the host registered the brief
+// tool under (defaults to "SendUserMessage").
+func ProactiveSection(opts tool.PromptOptions) string {
+	name := Name
+	if len(opts.Tools) > 0 {
+		for _, tl := range opts.Tools {
+			if tl == nil {
+				continue
+			}
+			if tl.Name() == Name || tl.Name() == LegacyName {
+				name = tl.Name()
+				break
+			}
+			for _, alias := range tl.Aliases() {
+				if alias == Name || alias == LegacyName {
+					name = tl.Name()
+					break
+				}
+			}
+		}
+	}
+	return "## Talking to the user\n\n" +
+		name + " is where your replies go. Text outside it is visible if the user expands the detail view, but most won't — assume unread. Anything you want them to actually see goes through " + name + ". The failure mode: the real answer lives in plain text while " + name + " just says \"done!\" — they see \"done!\" and miss everything.\n\n" +
+		"So: every time the user says something, the reply they actually read comes through " + name + ". Even for \"hi\". Even for \"thanks\".\n\n" +
+		"If you can answer right away, send the answer. If you need to go look — run a command, read files, check something — ack first in one line (\"On it — checking the test output\"), then work, then send the result. Without the ack they're staring at a spinner.\n\n" +
+		"For longer work: ack → work → result. Between those, send a checkpoint when something useful happened — a decision you made, a surprise you hit, a phase boundary. Skip the filler (\"running tests...\") — a checkpoint earns its place by carrying information.\n\n" +
+		"Keep messages tight — the decision, the file:line, the PR number. Second person always (\"your config\"), never third."
 }
 
 func (t *Tool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

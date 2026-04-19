@@ -9,7 +9,65 @@ import (
 	"testing"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
+	"github.com/wall-ai/ubuilding/backend/agents/tool"
 )
+
+type stubTool struct {
+	tool.ToolDefaults
+	name    string
+	aliases []string
+}
+
+func (s *stubTool) Name() string                         { return s.name }
+func (s *stubTool) Aliases() []string                    { return s.aliases }
+func (s *stubTool) InputSchema() *tool.JSONSchema        { return &tool.JSONSchema{Type: "object"} }
+func (s *stubTool) Description(_ json.RawMessage) string { return "" }
+func (s *stubTool) Prompt(_ tool.PromptOptions) string   { return "" }
+func (s *stubTool) Call(_ context.Context, _ json.RawMessage, _ *agents.ToolUseContext) (*tool.ToolResult, error) {
+	return nil, nil
+}
+func (s *stubTool) MapToolResultToParam(_ interface{}, _ string) *agents.ContentBlock {
+	return nil
+}
+
+func TestBrief_PromptKeywords(t *testing.T) {
+	p := New().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"Send a message the user will read",
+		"`message` supports markdown",
+		"`attachments` takes file paths",
+		"'normal'",
+		"'proactive'",
+		"downstream routing uses it",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("Brief.Prompt missing %q", want)
+		}
+	}
+}
+
+func TestBrief_ProactiveSectionKeywords(t *testing.T) {
+	sec := ProactiveSection(tool.PromptOptions{})
+	for _, want := range []string{
+		"## Talking to the user",
+		Name,
+		"Even for \"hi\"",
+		"ack → work → result",
+		"Second person always",
+	} {
+		if !strings.Contains(sec, want) {
+			t.Errorf("ProactiveSection missing %q", want)
+		}
+	}
+}
+
+func TestBrief_ProactiveSectionUsesAliasedName(t *testing.T) {
+	custom := &stubTool{name: "CustomBrief", aliases: []string{Name}}
+	sec := ProactiveSection(tool.PromptOptions{Tools: []tool.Tool{custom}})
+	if !strings.Contains(sec, "CustomBrief is where your replies go") {
+		t.Errorf("ProactiveSection did not honour aliased tool name; got:\n%s", sec)
+	}
+}
 
 // fakeResolver returns a canned attachment list.
 type fakeResolver struct{ atts []agents.BriefAttachment }

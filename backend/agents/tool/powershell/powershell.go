@@ -122,20 +122,8 @@ func (p *PowerShellTool) Description(input json.RawMessage) string {
 	return "PowerShell: " + cmd
 }
 
-func (p *PowerShellTool) Prompt(_ tool.PromptOptions) string {
-	return `Executes a PowerShell command on Windows.
-
-Usage:
-- Provide the command as a single string. Use PowerShell syntax (Get-ChildItem, Select-String, etc.).
-- Prefer Glob/Grep/Read tools for filesystem searches and file access.
-- Do NOT launch interactive programs (notepad, vim, ssh, etc.).
-- Long-running commands should set run_in_background=true and be polled via the Task* tools.
-
-Safety:
-- Commands matching a known-dangerous pattern (Remove-Item -Recurse -Force on root, IEX remote-exec, Invoke-WebRequest | IEX, Set-ExecutionPolicy Unrestricted, Format-Volume, Stop-Computer, Clear-Disk, cmd rd /s /q C:\) will be blocked.
-- Commands whose root is in the read-only allowlist (Get-ChildItem, Get-Content, Select-String, git status/diff/log, etc.) run without prompting.
-- Any other command requires user approval via the permission pipeline.
-`
+func (p *PowerShellTool) Prompt(opts tool.PromptOptions) string {
+	return buildPrompt(opts)
 }
 
 func (p *PowerShellTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

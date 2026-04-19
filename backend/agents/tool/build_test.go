@@ -3,7 +3,9 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
 )
@@ -69,9 +71,51 @@ func TestBuildTool_Overrides(t *testing.T) {
 	}
 }
 
+func TestAssemblePromptOptions_DerivedFields(t *testing.T) {
+	frozen := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+	po := AssemblePromptOptions(AssembleOptions{
+		UserType:            "ant",
+		EmbeddedSearchTools: true,
+		ForkEnabled:         true,
+		SandboxEnabled:      true,
+		AgentSwarmsEnabled:  true,
+		PowerShellEdition:   "core",
+		PreviewFormat:       "html",
+		Now:                 frozen,
+	})
+	if po.PlatformOS != runtime.GOOS {
+		t.Errorf("PlatformOS = %q, want %q", po.PlatformOS, runtime.GOOS)
+	}
+	if po.MonthYear != "April 2026" {
+		t.Errorf("MonthYear = %q, want April 2026", po.MonthYear)
+	}
+	if po.UserType != "ant" || !po.EmbeddedSearchTools || !po.ForkEnabled ||
+		!po.SandboxEnabled || !po.AgentSwarmsEnabled ||
+		po.PowerShellEdition != "core" || po.PreviewFormat != "html" {
+		t.Errorf("pass-through fields not preserved: %+v", po)
+	}
+}
+
+func TestAssemblePromptOptions_ZeroDefaults(t *testing.T) {
+	// Empty AssembleOptions should still produce a usable PromptOptions:
+	// derived fields populated, flags false/"" (legacy behaviour).
+	po := AssemblePromptOptions(AssembleOptions{})
+	if po.PlatformOS != runtime.GOOS {
+		t.Errorf("PlatformOS not auto-populated: %q", po.PlatformOS)
+	}
+	if po.MonthYear == "" {
+		t.Error("MonthYear must not be empty when Now is zero")
+	}
+	if po.UserType != "" || po.ForkEnabled || po.SandboxEnabled ||
+		po.AgentSwarmsEnabled || po.EmbeddedSearchTools ||
+		po.PowerShellEdition != "" || po.PreviewFormat != "" {
+		t.Errorf("zero-value defaults leaked to non-zero: %+v", po)
+	}
+}
+
 func TestBuildTool_RequiredFieldsPanic(t *testing.T) {
 	cases := []struct {
-		name  string
+		name   string
 		mutate func(*ToolDef)
 	}{
 		{"no Name", func(d *ToolDef) { d.Name = "" }},

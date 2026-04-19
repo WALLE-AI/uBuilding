@@ -144,7 +144,7 @@ func TestIntegration_Ported_Todo(t *testing.T) {
 	store := todo.NewStore()
 	tc := &agents.ToolUseContext{Ctx: context.Background(), TodoStore: store}
 	runOne(t, deps, tc, "TodoWrite", todo.Input{Todos: []todo.Item{
-		{ID: "1", Content: "do", Status: "in_progress", Priority: "high"},
+		{ID: "1", Content: "do", ActiveForm: "doing", Status: "in_progress", Priority: "high"},
 	}})
 	snap := store.Snapshot()
 	require.Len(t, snap, 1)

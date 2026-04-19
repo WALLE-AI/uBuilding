@@ -41,16 +41,16 @@ const (
 
 // Input matches claude-code's Grep input (subset).
 type Input struct {
-	Pattern        string `json:"pattern"`
-	Path           string `json:"path,omitempty"`
-	Glob           string `json:"glob,omitempty"`
-	CaseInsensitive bool  `json:"-i,omitempty"`
-	ShowLineNumbers bool  `json:"-n,omitempty"`
-	AfterContext   int    `json:"-A,omitempty"`
-	BeforeContext  int    `json:"-B,omitempty"`
-	Context        int    `json:"-C,omitempty"`
-	OutputMode     string `json:"output_mode,omitempty"`
-	HeadLimit      int    `json:"head_limit,omitempty"`
+	Pattern         string `json:"pattern"`
+	Path            string `json:"path,omitempty"`
+	Glob            string `json:"glob,omitempty"`
+	CaseInsensitive bool   `json:"-i,omitempty"`
+	ShowLineNumbers bool   `json:"-n,omitempty"`
+	AfterContext    int    `json:"-A,omitempty"`
+	BeforeContext   int    `json:"-B,omitempty"`
+	Context         int    `json:"-C,omitempty"`
+	OutputMode      string `json:"output_mode,omitempty"`
+	HeadLimit       int    `json:"head_limit,omitempty"`
 }
 
 // MatchLine records a single matched line.
@@ -62,15 +62,15 @@ type MatchLine struct {
 
 // Output is the structured result.
 type Output struct {
-	Pattern    string      `json:"pattern"`
-	Path       string      `json:"path"`
-	OutputMode string      `json:"output_mode"`
-	Files      []string    `json:"files,omitempty"`
+	Pattern    string         `json:"pattern"`
+	Path       string         `json:"path"`
+	OutputMode string         `json:"output_mode"`
+	Files      []string       `json:"files,omitempty"`
 	Counts     map[string]int `json:"counts,omitempty"`
-	Matches    []MatchLine `json:"matches,omitempty"`
-	Total      int         `json:"total"`
-	Truncated  bool        `json:"truncated,omitempty"`
-	UsedRg     bool        `json:"used_rg,omitempty"`
+	Matches    []MatchLine    `json:"matches,omitempty"`
+	Total      int            `json:"total"`
+	Truncated  bool           `json:"truncated,omitempty"`
+	UsedRg     bool           `json:"used_rg,omitempty"`
 }
 
 // Locator finds an external ripgrep binary. Return ("", false) to force the
@@ -107,10 +107,10 @@ func New() *Tool { return &Tool{locator: SystemLocator{}} }
 // WithLocator overrides the ripgrep locator (used for tests).
 func (t *Tool) WithLocator(l Locator) *Tool { t.locator = l; return t }
 
-func (t *Tool) Name() string                            { return Name }
-func (t *Tool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (t *Tool) Name() string                             { return Name }
+func (t *Tool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *Tool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
-func (t *Tool) MaxResultSizeChars() int                 { return 100_000 }
+func (t *Tool) MaxResultSizeChars() int                  { return 100_000 }
 
 func (t *Tool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -140,18 +140,21 @@ func (t *Tool) Description(input json.RawMessage) string {
 	return "Grep " + in.Pattern
 }
 
-func (t *Tool) Prompt(_ tool.PromptOptions) string {
-	return `Searches file contents using a regular expression. Uses ripgrep when available; falls back to a Go regex walker otherwise.
+func (t *Tool) Prompt(opts tool.PromptOptions) string {
+	bashRef := resolvePeer(opts, "Bash")
+	agentRef := resolvePeer(opts, "Task")
+	return `A powerful search tool built on ripgrep
 
-Params:
-- pattern (required): Go/PCRE-like regex.
-- path: root directory; defaults to cwd.
-- glob: restrict to files matching this pattern (e.g. "**/*.go").
-- -i: case-insensitive.
-- -n: include 1-indexed line numbers.
-- -A/-B/-C: context lines; -C overrides both.
-- output_mode: "content" (default), "files_with_matches", or "count".
-- head_limit: cap rows returned.`
+Usage:
+- ALWAYS use ` + Name + ` for search tasks. NEVER invoke ` + "`grep`" + ` or ` + "`rg`" + ` as a ` + bashRef + ` command. The ` + Name + ` tool has been optimized for correct permissions and access.
+- Supports full regex syntax (e.g., "log.*Error", "function\s+\w+")
+- Filter files with the glob parameter (e.g., "*.js", "**/*.tsx").
+- Output modes: "content" (default — matching lines), "files_with_matches" (file paths only), "count" (per-file match counts).
+- Use the ` + agentRef + ` tool for open-ended searches requiring multiple rounds.
+- Pattern syntax: Uses ripgrep (not grep) — literal braces need escaping (use ` + "`interface\\{\\}`" + ` to find ` + "`interface{}`" + ` in Go code).
+- Multiline matching: By default patterns match within single lines only. For cross-line patterns like ` + "`struct \\{[\\s\\S]*?field`" + `, use a multi-line-aware regex and set -C to capture surrounding context.
+- Context flags: -A (trailing), -B (leading), -C (both, overrides -A/-B). -n toggles 1-indexed line numbers in output.
+- head_limit caps the result rows (applies to content & files_with_matches modes). The engine transparently falls back to a Go regex walker when ripgrep is not on PATH.`
 }
 
 func (t *Tool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

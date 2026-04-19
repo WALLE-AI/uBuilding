@@ -3,6 +3,8 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"runtime"
+	"time"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
 )
@@ -96,14 +98,14 @@ type builtTool struct {
 	def ToolDef
 }
 
-func (b *builtTool) Name() string          { return b.def.Name }
-func (b *builtTool) Aliases() []string     { return b.def.Aliases }
+func (b *builtTool) Name() string             { return b.def.Name }
+func (b *builtTool) Aliases() []string        { return b.def.Aliases }
 func (b *builtTool) InputSchema() *JSONSchema { return b.def.InputSchema() }
 func (b *builtTool) Description(input json.RawMessage) string {
 	return b.def.Description(input)
 }
 func (b *builtTool) Prompt(opts PromptOptions) string { return b.def.Prompt(opts) }
-func (b *builtTool) IsEnabled() bool                    { return b.def.IsEnabled() }
+func (b *builtTool) IsEnabled() bool                  { return b.def.IsEnabled() }
 func (b *builtTool) IsReadOnly(input json.RawMessage) bool {
 	return b.def.IsReadOnly(input)
 }
@@ -129,3 +131,97 @@ func (b *builtTool) MapToolResultToParam(result interface{}, toolUseID string) *
 
 // Compile-time assertion.
 var _ Tool = (*builtTool)(nil)
+
+// ---------------------------------------------------------------------------
+// AssemblePromptOptions — one-shot builder for the dynamic PromptOptions
+// fields that every Tool.Prompt() implementation shares. Hosts call this
+// once per assembly (system-prompt rebuild) and pass the result down to
+// Tool.Prompt(opts). Individual tools must tolerate any field being the
+// zero value (keeps legacy callers who still pass `PromptOptions{}`
+// working unchanged).
+// ---------------------------------------------------------------------------
+
+// AssembleOptions carries the ambient state AssemblePromptOptions consults.
+// Every field has a sensible zero default; hosts only populate the bits
+// they care about.
+type AssembleOptions struct {
+	// Tools is the final resolved Tools slice (after assembly + deny
+	// filtering). Mirrors the legacy `PromptOptions.Tools` field.
+	Tools Tools
+
+	// PermissionContext mirrors legacy `PromptOptions.ToolPermissionContext`.
+	PermissionContext *agents.ToolPermissionContext
+
+	// UserType is "ant" for the Anthropic-internal variant, otherwise
+	// empty. Hosts typically read os.Getenv("USER_TYPE").
+	UserType string
+
+	// EmbeddedSearchTools signals the host is running inside an IDE or
+	// other embedded env — flips BashTool/PowerShell preferences.
+	EmbeddedSearchTools bool
+
+	// ForkEnabled toggles the AgentTool fork section.
+	ForkEnabled bool
+
+	// SandboxEnabled toggles the Bash sandbox block.
+	SandboxEnabled bool
+
+	// AgentSwarmsEnabled toggles TaskCreate/TaskList/TaskUpdate teammate
+	// wording.
+	AgentSwarmsEnabled bool
+
+	// PowerShellEdition is one of "desktop" | "core" | "" (unknown).
+	// Callers detect it via tool/shell.DetectPowerShellEdition() and pass
+	// the value in — AssemblePromptOptions does not probe anything.
+	PowerShellEdition string
+
+	// PreviewFormat for AskUserQuestion: "markdown" (default) or "html".
+	PreviewFormat string
+
+	// PlanModeInterviewEnabled mirrors TS's
+	// `isPlanModeInterviewPhaseEnabled()` and controls whether
+	// EnterPlanMode's inline "What Happens" section is emitted.
+	PlanModeInterviewEnabled bool
+
+	// AgentTool wiring.
+	AgentToolIsCoordinator bool
+	AgentListViaAttachment bool
+	IsTeammate             bool
+	IsInProcessTeammate    bool
+	DisableBackgroundTasks bool
+	SubscriptionType       string
+
+	// Now is an override clock for testing; when zero-valued
+	// time.Now() is used to compute MonthYear.
+	Now time.Time
+}
+
+// AssemblePromptOptions builds a PromptOptions from opts. It populates the
+// derived fields (PlatformOS, MonthYear) from runtime state and leaves
+// caller-supplied bits (UserType, ForkEnabled, …) untouched.
+func AssemblePromptOptions(opts AssembleOptions) PromptOptions {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return PromptOptions{
+		Tools:                    opts.Tools,
+		ToolPermissionContext:    opts.PermissionContext,
+		UserType:                 opts.UserType,
+		PlatformOS:               runtime.GOOS,
+		EmbeddedSearchTools:      opts.EmbeddedSearchTools,
+		ForkEnabled:              opts.ForkEnabled,
+		SandboxEnabled:           opts.SandboxEnabled,
+		AgentSwarmsEnabled:       opts.AgentSwarmsEnabled,
+		PowerShellEdition:        opts.PowerShellEdition,
+		MonthYear:                now.Format("January 2006"),
+		PreviewFormat:            opts.PreviewFormat,
+		PlanModeInterviewEnabled: opts.PlanModeInterviewEnabled,
+		AgentToolIsCoordinator:   opts.AgentToolIsCoordinator,
+		AgentListViaAttachment:   opts.AgentListViaAttachment,
+		IsTeammate:               opts.IsTeammate,
+		IsInProcessTeammate:      opts.IsInProcessTeammate,
+		DisableBackgroundTasks:   opts.DisableBackgroundTasks,
+		SubscriptionType:         opts.SubscriptionType,
+	}
+}

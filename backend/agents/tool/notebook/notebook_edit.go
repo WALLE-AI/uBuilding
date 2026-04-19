@@ -22,6 +22,7 @@ const Name = "NotebookEdit"
 const (
 	EditModeReplace = "replace"
 	EditModeInsert  = "insert"
+	EditModeDelete  = "delete"
 
 	CellTypeCode     = "code"
 	CellTypeMarkdown = "markdown"
@@ -47,10 +48,10 @@ type Output struct {
 
 // Notebook is the minimal nbformat v4 shape we care about.
 type Notebook struct {
-	Cells        []json.RawMessage      `json:"cells"`
-	Metadata     map[string]interface{} `json:"metadata"`
-	Nbformat     int                    `json:"nbformat"`
-	NbformatMinor int                   `json:"nbformat_minor"`
+	Cells         []json.RawMessage      `json:"cells"`
+	Metadata      map[string]interface{} `json:"metadata"`
+	Nbformat      int                    `json:"nbformat"`
+	NbformatMinor int                    `json:"nbformat_minor"`
 }
 
 type cellHeader struct {
@@ -69,11 +70,11 @@ func New(workspaceRoots ...string) *NotebookEditTool {
 	return &NotebookEditTool{workspaceRoots: workspaceRoots}
 }
 
-func (n *NotebookEditTool) Name() string                          { return Name }
-func (n *NotebookEditTool) IsReadOnly(_ json.RawMessage) bool     { return false }
+func (n *NotebookEditTool) Name() string                             { return Name }
+func (n *NotebookEditTool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (n *NotebookEditTool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
-func (n *NotebookEditTool) IsDestructive(_ json.RawMessage) bool  { return true }
-func (n *NotebookEditTool) MaxResultSizeChars() int               { return fileio.MaxResultChars }
+func (n *NotebookEditTool) IsDestructive(_ json.RawMessage) bool     { return true }
+func (n *NotebookEditTool) MaxResultSizeChars() int                  { return fileio.MaxResultChars }
 
 func (n *NotebookEditTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -82,11 +83,11 @@ func (n *NotebookEditTool) InputSchema() *tool.JSONSchema {
 			"notebook_path": {Type: "string", Description: "Absolute path to the .ipynb file."},
 			"cell_id":       {Type: "string", Description: "Target cell id (preferred over cell_number when set)."},
 			"cell_number":   {Type: "integer", Description: "0-indexed cell position when cell_id is not supplied."},
-			"edit_mode":     {Type: "string", Description: "replace (default) or insert.", Enum: []string{"replace", "insert"}},
+			"edit_mode":     {Type: "string", Description: "replace (default), insert, or delete.", Enum: []string{"replace", "insert", "delete"}},
 			"cell_type":     {Type: "string", Description: "Cell type for insert mode.", Enum: []string{"code", "markdown"}},
-			"new_source":    {Type: "string", Description: "New cell source."},
+			"new_source":    {Type: "string", Description: "New cell source (ignored for delete)."},
 		},
-		Required: []string{"notebook_path", "new_source"},
+		Required: []string{"notebook_path"},
 	}
 }
 
@@ -100,15 +101,17 @@ func (n *NotebookEditTool) Description(input json.RawMessage) string {
 }
 
 func (n *NotebookEditTool) Prompt(_ tool.PromptOptions) string {
-	return `Replaces or inserts a cell in a Jupyter notebook (.ipynb).
+	return `Completely replaces the contents of a specific cell in a Jupyter notebook (.ipynb file) with new source, inserts a new cell, or deletes an existing cell. Jupyter notebooks are interactive documents that combine code, text, and visualizations, commonly used for data analysis and scientific computing.
 
 Rules:
-- notebook_path MUST be absolute.
-- Target cell via cell_id (preferred) or cell_number (0-indexed).
-- edit_mode: "replace" (default) overwrites the target cell's source; "insert" adds a new cell at cell_number.
-- Inserting into an empty notebook requires cell_number=0.
-- cell_type (code|markdown) is required for insert mode.
-- Deletion is NOT supported. To "remove" a cell, edit its source to indicate it should be deleted manually.`
+- notebook_path MUST be absolute, not relative.
+- Target the cell via cell_id (preferred when known) or cell_number (0-indexed).
+- edit_mode options:
+  - "replace" (default): overwrites the target cell's source with new_source.
+  - "insert": adds a new cell at cell_number. cell_type (code|markdown) is required; inserting into an empty notebook requires cell_number=0.
+  - "delete": removes the cell at cell_number (or matching cell_id). new_source is ignored.
+- new_source is required for replace/insert; it is optional for delete.
+- You should Read the notebook before editing so you know which cell you are targeting.`
 }
 
 func (n *NotebookEditTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
@@ -126,8 +129,10 @@ func (n *NotebookEditTool) ValidateInput(input json.RawMessage, _ *agents.ToolUs
 	if mode == "" {
 		mode = EditModeReplace
 	}
-	if mode != EditModeReplace && mode != EditModeInsert {
-		return &tool.ValidationResult{Valid: false, Message: "edit_mode must be replace or insert"}
+	switch mode {
+	case EditModeReplace, EditModeInsert, EditModeDelete:
+	default:
+		return &tool.ValidationResult{Valid: false, Message: "edit_mode must be replace|insert|delete"}
 	}
 	if mode == EditModeInsert {
 		if in.CellNumber == nil {
@@ -135,6 +140,11 @@ func (n *NotebookEditTool) ValidateInput(input json.RawMessage, _ *agents.ToolUs
 		}
 		if in.CellType != CellTypeCode && in.CellType != CellTypeMarkdown {
 			return &tool.ValidationResult{Valid: false, Message: "insert requires cell_type=code|markdown"}
+		}
+	}
+	if mode == EditModeDelete {
+		if in.CellID == "" && in.CellNumber == nil {
+			return &tool.ValidationResult{Valid: false, Message: "delete requires cell_id or cell_number"}
 		}
 	}
 	return &tool.ValidationResult{Valid: true}
@@ -202,6 +212,21 @@ func (n *NotebookEditTool) Call(ctx context.Context, input json.RawMessage, tool
 			return nil, err
 		}
 		return &tool.ToolResult{Data: Output{NotebookPath: path, EditMode: mode, CellIndex: idx}}, nil
+
+	case EditModeDelete:
+		if len(nb.Cells) == 0 {
+			return nil, errors.New("cannot delete from an empty notebook")
+		}
+		idx, err := locateCell(nb.Cells, in.CellID, in.CellNumber)
+		if err != nil {
+			return nil, err
+		}
+		deletedID, _ := cellIDOf(nb.Cells[idx])
+		nb.Cells = append(nb.Cells[:idx], nb.Cells[idx+1:]...)
+		if err := writeNotebook(path, &nb); err != nil {
+			return nil, err
+		}
+		return &tool.ToolResult{Data: Output{NotebookPath: path, EditMode: mode, CellIndex: idx, CellID: deletedID}}, nil
 	}
 	return nil, fmt.Errorf("unsupported edit_mode %q", mode)
 }
@@ -229,7 +254,11 @@ func renderOutput(content interface{}) string {
 		b, _ := json.Marshal(content)
 		return string(b)
 	}
-	return fmt.Sprintf("%s %s cell[%d] in %s", strings.Title(out.EditMode), "notebook", out.CellIndex, out.NotebookPath)
+	verb := strings.Title(out.EditMode)
+	if out.EditMode == EditModeDelete {
+		return fmt.Sprintf("%s cell[%d] in %s", verb+"d", out.CellIndex, out.NotebookPath)
+	}
+	return fmt.Sprintf("%s notebook cell[%d] in %s", verb, out.CellIndex, out.NotebookPath)
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────

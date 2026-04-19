@@ -44,8 +44,8 @@ type Tool struct {
 // New returns an ExitPlanMode tool.
 func New() *Tool { return &Tool{} }
 
-func (t *Tool) Name() string                            { return Name }
-func (t *Tool) IsReadOnly(_ json.RawMessage) bool       { return false }
+func (t *Tool) Name() string                             { return Name }
+func (t *Tool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (t *Tool) IsConcurrencySafe(_ json.RawMessage) bool { return false }
 
 func (t *Tool) InputSchema() *tool.JSONSchema {
@@ -60,14 +60,7 @@ func (t *Tool) InputSchema() *tool.JSONSchema {
 
 func (t *Tool) Description(_ json.RawMessage) string { return "Exit plan mode and begin execution" }
 
-func (t *Tool) Prompt(_ tool.PromptOptions) string {
-	return `Signals the end of plan mode and the start of execution.
-
-Rules:
-- Only call this from plan mode (the engine refuses the call otherwise).
-- plan: a concise markdown summary of what will be done next.
-- After this call, the engine switches to normal (execution) mode and hosts are notified via a plan_mode_change event.`
-}
+func (t *Tool) Prompt(opts tool.PromptOptions) string { return buildExitPrompt(opts) }
 
 func (t *Tool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
 	var in Input

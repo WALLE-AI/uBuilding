@@ -5,8 +5,26 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/wall-ai/ubuilding/backend/agents/tool"
 )
+
+func TestGlob_PromptKeywords(t *testing.T) {
+	p := New().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"Fast file pattern matching",
+		"**/*.js",
+		"sorted by modification time",
+		"Task",
+		"open ended search",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("Glob.Prompt() missing %q\n----\n%s", want, p)
+		}
+	}
+}
 
 func mktree(t *testing.T, files map[string]string) string {
 	t.Helper()
@@ -25,11 +43,11 @@ func mktree(t *testing.T, files map[string]string) string {
 
 func TestGlob_DoubleStar(t *testing.T) {
 	dir := mktree(t, map[string]string{
-		"a.go":            "",
-		"src/b.go":        "",
-		"src/inner/c.go":  "",
-		"README.md":       "",
-		"vendor/d.go":     "",
+		"a.go":           "",
+		"src/b.go":       "",
+		"src/inner/c.go": "",
+		"README.md":      "",
+		"vendor/d.go":    "",
 	})
 	g := New()
 	raw, _ := json.Marshal(Input{Pattern: "**/*.go", Path: dir})
@@ -45,8 +63,8 @@ func TestGlob_DoubleStar(t *testing.T) {
 
 func TestGlob_SingleStar(t *testing.T) {
 	dir := mktree(t, map[string]string{
-		"src/a.ts": "",
-		"src/b.ts": "",
+		"src/a.ts":     "",
+		"src/b.ts":     "",
 		"src/sub/c.ts": "",
 	})
 	g := New()

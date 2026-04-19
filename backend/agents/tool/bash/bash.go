@@ -137,22 +137,8 @@ func (b *BashTool) Description(input json.RawMessage) string {
 	return "Bash: " + cmd
 }
 
-func (b *BashTool) Prompt(_ tool.PromptOptions) string {
-	return `Executes a bash command in the user's environment.
-
-Usage:
-- Provide the command as a single string. Chain with && / || / ; as needed.
-- Always quote paths that contain spaces.
-- Do NOT use this tool to run interactive programs (vim, less, top, ssh, etc.).
-- Prefer Glob/Grep/Read tools for filesystem searches and file access.
-- Long-running commands should set run_in_background=true and be polled via the Task* tools.
-- Background jobs: do not rely on shell job control (&, nohup); use run_in_background instead.
-
-Safety:
-- Commands matching a known-dangerous pattern (sudo, rm -rf /, curl|sh, mkfs, dd of=/dev/*, fork bombs, chmod 777 /, shutdown/reboot) will be blocked.
-- Commands whose root is in the read-only allowlist (ls, cat, grep, git status/diff/log, go version/env, etc.) run without prompting.
-- Any other command requires user approval via the permission pipeline.
-`
+func (b *BashTool) Prompt(opts tool.PromptOptions) string {
+	return buildPrompt(opts)
 }
 
 func (b *BashTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

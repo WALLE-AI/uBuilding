@@ -149,9 +149,94 @@ type ValidationResult struct {
 }
 
 // PromptOptions are passed to Tool.Prompt() for context-aware descriptions.
+//
+// The first two fields existed from day one; the remaining fields were added
+// in Sprint S1 of the "tools prompt/feature deep alignment" effort so that
+// individual Tool.Prompt() implementations can mirror the dynamic segments
+// claude-code-main emits (git/sandbox blocks, ant-vs-external wording,
+// PowerShell edition branch, fork-enabled AgentTool examples, etc.).
+//
+// All of the new fields are zero-valued by default. A tool that reads them
+// must treat the zero value as "feature disabled / use conservative
+// default", which keeps callers that still pass `PromptOptions{}` working
+// unchanged.
 type PromptOptions struct {
 	Tools                 []Tool
 	ToolPermissionContext *agents.ToolPermissionContext
+
+	// UserType is "" for the default external prompt or "ant" for the
+	// Anthropic-internal variant. Maps to TS `process.env.USER_TYPE`.
+	UserType string
+
+	// PlatformOS is runtime.GOOS at assembly time ("windows", "linux",
+	// "darwin"). Used by Bash/PowerShell prompts to decide which syntax
+	// guidance to emit.
+	PlatformOS string
+
+	// EmbeddedSearchTools signals that the host is running inside an IDE /
+	// embedded environment where find/grep/ls should NOT be mentioned as
+	// disallowed (they never reach a real shell). Mirrors the `embedded`
+	// branch inside BashTool/prompt.ts.
+	EmbeddedSearchTools bool
+
+	// ForkEnabled toggles the AgentTool fork section (fork spawn, fork
+	// examples, "When to fork" block). Host sets this from
+	// `agents.ForkSubagentEnabled()`.
+	ForkEnabled bool
+
+	// SandboxEnabled toggles the Bash sandbox block. Off by default — the
+	// Go backend does not yet ship a sandbox implementation.
+	SandboxEnabled bool
+
+	// AgentSwarmsEnabled toggles TaskCreate/TaskList/TaskUpdate teammate
+	// wording (owner assignment, "find next task" workflow). Mirrors TS's
+	// `isAgentSwarmsEnabled()` feature flag.
+	AgentSwarmsEnabled bool
+
+	// PowerShellEdition is one of "desktop" | "core" | "" (unknown). The
+	// PowerShell tool uses it to emit edition-specific syntax guidance.
+	PowerShellEdition string
+
+	// MonthYear is time.Now().Format("January 2006"). WebSearch renders it
+	// into the "current month" instruction so the LLM uses the right year
+	// in queries. Exposed as an option (not recomputed inside the tool)
+	// so tests can freeze it.
+	MonthYear string
+
+	// PreviewFormat selects the preview-block variant for
+	// AskUserQuestion: "markdown" (default) or "html".
+	PreviewFormat string
+
+	// PlanModeInterviewEnabled mirrors TS's
+	// `isPlanModeInterviewPhaseEnabled()`. When true, EnterPlanMode omits
+	// the inline "What Happens in Plan Mode" section because hosts inject
+	// the workflow instructions via a plan_mode attachment message.
+	PlanModeInterviewEnabled bool
+
+	// AgentToolIsCoordinator toggles the slim coordinator branch of the
+	// Task/AgentTool prompt (getPrompt(…, isCoordinator=true)).
+	AgentToolIsCoordinator bool
+
+	// AgentListViaAttachment matches upstream
+	// shouldInjectAgentListInMessages(): when true, the prompt replaces
+	// the inline catalog with a <system-reminder> pointer.
+	AgentListViaAttachment bool
+
+	// IsTeammate mirrors utils/teammate.isTeammate() — cross-teammate
+	// spawning is disabled, so the prompt hides name/team_name/mode.
+	IsTeammate bool
+
+	// IsInProcessTeammate mirrors utils/teammateContext.isInProcessTeammate()
+	// — background/name/team_name/mode are all unavailable.
+	IsInProcessTeammate bool
+
+	// DisableBackgroundTasks mirrors env CLAUDE_CODE_DISABLE_BACKGROUND_TASKS.
+	// When true, AgentTool omits the run_in_background paragraph.
+	DisableBackgroundTasks bool
+
+	// SubscriptionType is "" / "pro" / etc. (utils/auth.getSubscriptionType()).
+	// Non-pro tiers see the "Launch multiple agents concurrently" tip.
+	SubscriptionType string
 }
 
 // ---------------------------------------------------------------------------

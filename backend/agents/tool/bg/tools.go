@@ -19,13 +19,36 @@ const (
 )
 
 // OutputInput is the TaskOutput input shape.
+//
+// Upstream claude-code-main renamed AgentOutputTool/BashOutputTool to
+// TaskOutput and standardised on `task_id`; it still maps the legacy
+// `bash_id` / `agentId` parameter names onto `task_id` at the API layer
+// (see utils/api.ts around TASK_OUTPUT_TOOL_NAME). We accept all three here.
 type OutputInput struct {
 	// BashID is the id returned by a previous Bash/PowerShell call that was
-	// invoked with run_in_background=true.
-	BashID string `json:"bash_id"`
+	// invoked with run_in_background=true. Kept for backwards compatibility
+	// with the BashOutputTool surface.
+	BashID string `json:"bash_id,omitempty"`
+	// TaskID is the upstream canonical name for the same value.
+	TaskID string `json:"task_id,omitempty"`
+	// AgentID is the legacy AgentOutputTool alias.
+	AgentID string `json:"agentId,omitempty"`
 	// Incremental, when true (default), returns only the output emitted since
 	// the last TaskOutput call for this id. Set false to re-read everything.
 	Incremental *bool `json:"incremental,omitempty"`
+}
+
+// resolveID returns the id the caller supplied via any of the three aliases.
+func (in OutputInput) resolveID() string {
+	switch {
+	case strings.TrimSpace(in.BashID) != "":
+		return strings.TrimSpace(in.BashID)
+	case strings.TrimSpace(in.TaskID) != "":
+		return strings.TrimSpace(in.TaskID)
+	case strings.TrimSpace(in.AgentID) != "":
+		return strings.TrimSpace(in.AgentID)
+	}
+	return ""
 }
 
 // OutputResult is the TaskOutput result surfaced to the model.
@@ -73,31 +96,39 @@ type OutputTool struct {
 // NewOutputTool returns a TaskOutput tool.
 func NewOutputTool() *OutputTool { return &OutputTool{} }
 
-func (t *OutputTool) Name() string                            { return OutputName }
-func (t *OutputTool) IsReadOnly(_ json.RawMessage) bool       { return true }
+func (t *OutputTool) Name() string                             { return OutputName }
+func (t *OutputTool) IsReadOnly(_ json.RawMessage) bool        { return true }
 func (t *OutputTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
+
+// Aliases mirrors upstream's backwards-compatible aliases
+// (AgentOutputTool / BashOutputTool) so permission rules and rename
+// migrations keep working.
+func (t *OutputTool) Aliases() []string { return []string{"AgentOutputTool", "BashOutputTool"} }
 
 func (t *OutputTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
 		Type: "object",
 		Properties: map[string]*tool.SchemaProperty{
-			"bash_id":     {Type: "string", Description: "ID returned by Bash / PowerShell with run_in_background=true."},
+			"task_id":     {Type: "string", Description: "ID returned by a Bash/PowerShell call with run_in_background=true. Upstream canonical name."},
+			"bash_id":     {Type: "string", Description: "Legacy alias for task_id (BashOutputTool surface)."},
+			"agentId":     {Type: "string", Description: "Legacy alias for task_id (AgentOutputTool surface)."},
 			"incremental": {Type: "boolean", Description: "Return only newly emitted output since the last call (default true)."},
 		},
-		Required: []string{"bash_id"},
 	}
 }
 
-func (t *OutputTool) Description(_ json.RawMessage) string { return "Read output from a background shell job" }
+func (t *OutputTool) Description(_ json.RawMessage) string {
+	return "[Deprecated] — prefer Read on the task output file path"
+}
 
 func (t *OutputTool) Prompt(_ tool.PromptOptions) string {
-	return `Reads captured output from a background shell job started via Bash / PowerShell (run_in_background=true).
+	return `DEPRECATED: Prefer using the Read tool on the task's output file path instead. Background tasks return their output file path in the tool result, and you receive a <task-notification> with the same path when the task completes — Read that file directly.
 
-Params:
-- bash_id (required): the id returned by the background Bash call.
-- incremental: default true — returns only bytes since the previous TaskOutput; false returns the full buffer.
-
-Returns status (running | succeeded | failed | cancelled), exit_code, output slice, and output_cursor for pagination.`
+- Retrieves output from a running or completed task (background shell, agent, or remote session)
+- Takes a ` + "`task_id`" + ` parameter identifying the task (legacy aliases ` + "`bash_id`" + ` / ` + "`agentId`" + ` are accepted for backwards compatibility)
+- Returns the task output along with status information
+- Use ` + "`incremental=true`" + ` (default) to receive only bytes emitted since the previous call; ` + "`incremental=false`" + ` returns the full captured buffer
+- Works with all task types: background shells, async agents, and remote sessions`
 }
 
 func (t *OutputTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {
@@ -105,8 +136,8 @@ func (t *OutputTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseConte
 	if err := json.Unmarshal(input, &in); err != nil {
 		return &tool.ValidationResult{Valid: false, Message: fmt.Sprintf("invalid input: %v", err)}
 	}
-	if strings.TrimSpace(in.BashID) == "" {
-		return &tool.ValidationResult{Valid: false, Message: "bash_id required"}
+	if in.resolveID() == "" {
+		return &tool.ValidationResult{Valid: false, Message: "task_id required (aliases: bash_id, agentId)"}
 	}
 	return &tool.ValidationResult{Valid: true}
 }
@@ -120,6 +151,10 @@ func (t *OutputTool) Call(ctx context.Context, input json.RawMessage, toolCtx *a
 	if err := json.Unmarshal(input, &in); err != nil {
 		return nil, err
 	}
+	id := in.resolveID()
+	if id == "" {
+		return nil, errors.New("TaskOutput: task_id required")
+	}
 	mgr := managerFromCtx(toolCtx)
 	if mgr == nil {
 		return nil, errors.New("TaskOutput: no bg.Manager attached to context")
@@ -128,7 +163,7 @@ func (t *OutputTool) Call(ctx context.Context, input json.RawMessage, toolCtx *a
 	if in.Incremental != nil {
 		advance = *in.Incremental
 	}
-	job, slice, trunc, err := mgr.ReadOutput(in.BashID, advance)
+	job, slice, trunc, err := mgr.ReadOutput(id, advance)
 	if err != nil {
 		return nil, err
 	}
@@ -192,10 +227,13 @@ type StopTool struct {
 // NewStopTool returns a TaskStop tool.
 func NewStopTool() *StopTool { return &StopTool{} }
 
-func (t *StopTool) Name() string                            { return StopName }
-func (t *StopTool) IsReadOnly(_ json.RawMessage) bool       { return false }
+func (t *StopTool) Name() string                             { return StopName }
+func (t *StopTool) IsReadOnly(_ json.RawMessage) bool        { return false }
 func (t *StopTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
-func (t *StopTool) IsDestructive(_ json.RawMessage) bool    { return true }
+func (t *StopTool) IsDestructive(_ json.RawMessage) bool     { return true }
+
+// Aliases mirrors upstream's KillShell → TaskStop rename.
+func (t *StopTool) Aliases() []string { return []string{"KillShell"} }
 
 func (t *StopTool) InputSchema() *tool.JSONSchema {
 	return &tool.JSONSchema{
@@ -207,10 +245,23 @@ func (t *StopTool) InputSchema() *tool.JSONSchema {
 	}
 }
 
-func (t *StopTool) Description(_ json.RawMessage) string { return "Cancel a background job or task-graph node" }
+func (t *StopTool) Description(_ json.RawMessage) string {
+	return `
+- Stops a running background task by its ID
+- Takes a task_id parameter identifying the task to stop
+- Returns a success or failure status
+- Use this tool when you need to terminate a long-running task
+`
+}
 
 func (t *StopTool) Prompt(_ tool.PromptOptions) string {
-	return `Cancels an in-progress background shell job OR a task-graph node. The tool tries the bg-shell manager first (ids start with "bash_") and falls back to the task-graph store.`
+	return `Cancels an in-progress background task by its ID.
+
+- Takes a ` + "`id`" + ` parameter that may be either a bg-shell id (from Bash / PowerShell with run_in_background=true) or a task-graph node id (from TaskCreate).
+- The tool tries the bg-shell manager first (ids starting with "bash_" or owned by the manager) and falls back to the task-graph store for graph nodes.
+- Returns the resulting status (e.g. cancelled) and which side handled the stop ("bg" or "graph").
+- Use this tool when you need to terminate a long-running task.
+`
 }
 
 func (t *StopTool) ValidateInput(input json.RawMessage, _ *agents.ToolUseContext) *tool.ValidationResult {

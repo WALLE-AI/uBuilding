@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
+	"github.com/wall-ai/ubuilding/backend/agents/tool"
 )
 
 func newToolCtx() *agents.ToolUseContext {
@@ -208,6 +209,72 @@ func TestWrite_OverwriteRequiresRead(t *testing.T) {
 	data, _ := os.ReadFile(p)
 	if string(data) != "new" {
 		t.Fatalf("bad contents: %q", data)
+	}
+}
+
+// Sprint-2 Prompt() keyword coverage. These are deliberately coarse so
+// they fail only when a required bullet is dropped (not for minor
+// rewording). Add one keyword per upstream prompt.ts bullet.
+func TestRead_PromptKeywords(t *testing.T) {
+	p := NewReadTool().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"absolute path",
+		"cat -n",
+		"images",
+		"Jupyter notebooks",
+		"ls command via the Bash tool",
+		"binary",
+		"empty contents",
+		"Read it first",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("Read.Prompt() missing %q\n----\n%s", want, p)
+		}
+	}
+}
+
+func TestEdit_PromptKeywords(t *testing.T) {
+	p := NewEditTool().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"exact string replacements",
+		"Read",
+		"line number prefix",
+		"spaces + line number + tab",
+		"replace_all",
+		"prefer editing existing files",
+		"Only use emojis",
+		"identical",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("Edit.Prompt() missing %q\n----\n%s", want, p)
+		}
+	}
+}
+
+func TestEdit_PromptAntBranchAddsUniquenessHint(t *testing.T) {
+	extern := NewEditTool().Prompt(tool.PromptOptions{})
+	ant := NewEditTool().Prompt(tool.PromptOptions{UserType: "ant"})
+	if strings.Contains(extern, "smallest old_string") {
+		t.Fatal("external prompt leaked the ant-only hint")
+	}
+	if !strings.Contains(ant, "smallest old_string") {
+		t.Fatal("ant prompt missing minimal-uniqueness hint")
+	}
+}
+
+func TestWrite_PromptKeywords(t *testing.T) {
+	p := NewWriteTool().Prompt(tool.PromptOptions{})
+	for _, want := range []string{
+		"overwrite the existing file",
+		"MUST use the `Read` tool first",
+		"Prefer the Edit tool",
+		"NEVER create documentation files",
+		"Only use emojis",
+		"absolute path",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("Write.Prompt() missing %q\n----\n%s", want, p)
+		}
 	}
 }
 
