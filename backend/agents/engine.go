@@ -603,20 +603,30 @@ func (e *QueryEngine) processUserInput(
 	return result
 }
 
-// defaultToolUseContext creates a default ToolUseContext.
+// defaultToolUseContext creates a default ToolUseContext. A09 wires in the
+// SpawnSubAgent callback and surfaces the active agent catalog so the Task
+// tool can render its agent listing and enforce allowedAgentTypes. B04
+// threads the sub-agent permission-mode overlay when SpawnSubAgent has
+// stamped EngineConfig.SubagentPermissionMode on this engine.
 func (e *QueryEngine) defaultToolUseContext(ctx context.Context) *ToolUseContext {
 	childCtx, cancel := context.WithCancel(ctx)
+	opts := ToolUseOptions{
+		MainLoopModel:      e.config.UserSpecifiedModel,
+		Verbose:            e.config.Verbose,
+		ThinkingConfig:     e.config.ThinkingConfig,
+		CustomSystemPrompt: e.config.CustomSystemPrompt,
+		AppendSystemPrompt: e.config.AppendSystemPrompt,
+		AgentDefinitions:   e.Agents(),
+	}
+	if e.config.SubagentPermissionMode != "" {
+		opts.AgentPermissionMode = e.config.SubagentPermissionMode
+	}
 	return &ToolUseContext{
 		Ctx:           childCtx,
 		CancelFunc:    cancel,
 		ReadFileState: NewFileStateCache(),
-		Options: ToolUseOptions{
-			MainLoopModel:      e.config.UserSpecifiedModel,
-			Verbose:            e.config.Verbose,
-			ThinkingConfig:     e.config.ThinkingConfig,
-			CustomSystemPrompt: e.config.CustomSystemPrompt,
-			AppendSystemPrompt: e.config.AppendSystemPrompt,
-		},
+		SpawnSubAgent: e.SpawnSubAgent,
+		Options:       opts,
 	}
 }
 
@@ -642,6 +652,14 @@ func (e *QueryEngine) GetMessages() []Message {
 // GetSessionID returns the session identifier.
 func (e *QueryEngine) GetSessionID() string {
 	return e.sessionID
+}
+
+// Config returns a shallow copy of the engine's EngineConfig. Maps, slices
+// and function values are shared with the engine — callers must not
+// mutate them. Intended for read-only inspection by hosts (e.g. to check
+// IsCoordinatorMode or the filtered Tools slice).
+func (e *QueryEngine) Config() EngineConfig {
+	return e.config
 }
 
 // GetUsage returns the total accumulated token usage.

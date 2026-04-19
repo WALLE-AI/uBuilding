@@ -1,6 +1,9 @@
 package agents
 
-import "os"
+import (
+	"os"
+	"strings"
+)
 
 // QueryConfig is an immutable snapshot of environment and feature gates
 // taken at the start of each query loop iteration. Corresponds to
@@ -63,10 +66,12 @@ func BuildQueryConfigFromEngine(sessionID string, cfg EngineConfig) QueryConfig 
 	return BuildQueryConfig(sessionID, gates)
 }
 
-// isEnvTruthy returns true if the value is "1", "true", or "yes" (case-insensitive).
+// isEnvTruthy returns true if the value is "1", "true", "yes", or "on"
+// (case-insensitive, surrounding whitespace ignored). Mirrors TS
+// isEnvTruthy. Shared by config and agent-builtin callers.
 func isEnvTruthy(val string) bool {
-	switch val {
-	case "1", "true", "TRUE", "yes", "YES":
+	switch strings.ToLower(strings.TrimSpace(val)) {
+	case "1", "true", "yes", "on":
 		return true
 	}
 	return false

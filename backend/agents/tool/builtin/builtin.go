@@ -69,11 +69,17 @@ func Register(r *tool.Registry, opts ...Options) {
 	}
 }
 
-// AllTools returns the complete ported tool set: WebSearch, WebFetch, Read,
-// Edit, Write, NotebookEdit, Glob, Grep, Bash/PowerShell (platform-routed),
-// TodoWrite, AskUserQuestion, ExitPlanMode, the bg-shell tools (TaskOutput /
-// TaskStop), the TodoV2 task-graph tools (TaskCreate / TaskGet / TaskUpdate /
-// TaskList), and the Task subagent tool.
+// AllTools returns the complete ported tool set, mirroring claude-code-main's
+// getAllBaseTools() (modulo feature-gated extras). Alphabetical primary names:
+//
+//	AskUserQuestion, Bash (or PowerShell on Windows), Edit, EnterPlanMode,
+//	ExitPlanMode, Glob, Grep, ListMcpResourcesTool, NotebookEdit, Read,
+//	ReadMcpResourceTool, SendUserMessage, Task (AgentTool subagent),
+//	TaskCreate, TaskGet, TaskList, TaskOutput, TaskStop, TaskUpdate,
+//	TodoWrite, WebFetch, WebSearch, Write.
+//
+// Upstream tools not yet ported: SkillTool (default set), SendMessageTool
+// (coordinator/agent-swarm extension). See backend/agents/REAL_LLM_TOOLS_AUDIT.md.
 func AllTools(opts ...Options) tool.Tools {
 	var o Options
 	if len(opts) > 0 {

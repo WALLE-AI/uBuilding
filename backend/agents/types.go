@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -392,6 +393,94 @@ type EngineConfig struct {
 	// Callers typically wire this to prompt.SectionCache.Clear() to match
 	// TS clearSystemPromptSections() semantics. Nil means no-op.
 	OnCompactBoundary func()
+
+	// --- A07 · agent discovery --------------------------------------------
+
+	// Agents is the fully resolved agent registry for this session. When
+	// non-nil, the engine wires SpawnSubAgent and injects the active set
+	// into ToolUseContext.Options.AgentDefinitions for the Task tool.
+	//
+	// Hosts that need bespoke search paths should populate this via
+	// ResolveActiveAgents(LoaderConfig{…}). Leaving Agents nil while
+	// AgentsLoader is non-nil makes the engine resolve lazily on first
+	// SubmitMessage.
+	Agents *AgentDefinitions
+
+	// AgentsLoader, when non-nil and Agents is nil, is invoked once before
+	// the first SubmitMessage to resolve the active agent set. Typically
+	// set to `func() (*AgentDefinitions, []LoadError) { return ResolveActiveAgents(cfg) }`.
+	AgentsLoader func() (*AgentDefinitions, []LoadError)
+
+	// MaxSubagentDepth caps how many levels of nested SpawnSubAgent are
+	// allowed. 0 uses the default (3). Set to a negative value to
+	// disable the guard entirely (only recommended in tests).
+	MaxSubagentDepth int
+
+	// DefaultSubagentMaxTurns caps each sub-agent's turn count when neither
+	// the AgentDefinition nor SubAgentParams supplies one. 0 uses the
+	// engine-wide MaxTurns.
+	DefaultSubagentMaxTurns int
+
+	// ResolveSubagentTools, when non-nil, is invoked by SpawnSubAgent to
+	// produce the sub-agent's tool pool (post-filter, post-deny, post-
+	// allowlist). Hosts wire this to tool.ResolveAgentTools so the sub-
+	// agent sees the pool implied by the agent definition's allow/deny
+	// lists and the baseline async / MCP constraints (B01 + B08).
+	//
+	// The signature takes and returns `[]interface{}` to stay free of a
+	// tool-package import from agents; the host-side shim converts.
+	ResolveSubagentTools func(parent []interface{}, def *AgentDefinition, isAsync bool) []interface{}
+
+	// SubagentPermissionMode, when non-empty, is applied as the agent's
+	// permission-mode overlay on the child ToolUseContext (via
+	// ToolUseOptions.AgentPermissionMode). Populated by SpawnSubAgent from
+	// the AgentDefinition; hosts usually leave it unset on the parent config.
+	SubagentPermissionMode string
+
+	// SubagentOmitClaudeMd is the A19 hook: when true, the child engine's
+	// BuildSystemPromptFn / LoadMemories path MUST strip CLAUDE.md and git-
+	// status fragments from userContext/systemContext. Populated by
+	// SpawnSubAgent from AgentDefinition.OmitClaudeMd (Explore/Plan set this
+	// so their read-only searches don't spend tokens on unused memory).
+	//
+	// Hosts that wire a custom BuildSystemPromptFn should consult this flag;
+	// the default legacy BaseSystemPrompt path already drops claudeMd since
+	// the child re-renders the prompt from the AgentDefinition alone.
+	SubagentOmitClaudeMd bool
+
+	// AgentMemoryConfig is the per-engine memory configuration used by
+	// SpawnSubAgent when the sub-agent definition declares a non-empty
+	// Memory scope (C08). Leaving the zero-value in uses DefaultUserMemoryDir
+	// + <Cwd>/.claude/agent-memory{,-local}/. Hosts typically leave this
+	// unset and override Cwd alone.
+	AgentMemoryConfig AgentMemoryConfig
+
+	// ResolveAgentSkill, when non-nil, turns an agent frontmatter skill
+	// name into content blocks that SpawnSubAgent pre-pends to the sub-
+	// agent's conversation as a meta user message (C06).
+	//
+	// Hosts wire this to their skill-command registry (e.g. /commit,
+	// /verify). Returning nil content skips that skill silently; an error
+	// aborts the spawn.
+	ResolveAgentSkill func(ctx context.Context, agentType, skill string) ([]ContentBlock, error)
+
+	// SkillInvocationLog, when non-nil, receives the "skill was invoked
+	// for agent X" records SpawnSubAgent collects during C06 preload. The
+	// sub-agent's agent id is cleared from the log via
+	// ClearInvokedSkillsForAgent on defer (C11). Hosts that use
+	// MakeSkillResolver usually pass the same *SkillInvocationLog they
+	// wired into ResolveAgentSkill so cleanup lines up.
+	SkillInvocationLog *SkillInvocationLog
+
+	// HookRegistry is the shared shell-hook registry. SpawnSubAgent fires
+	// SubagentStart hooks against it (C03) and registers agent-frontmatter
+	// hooks scoped to the agent id (C05 + C10). Nil disables hook
+	// integration — agents still run but frontmatter hooks are ignored.
+	HookRegistry *ShellHookRegistry
+
+	// MCPConnector, when non-nil, lets SpawnSubAgent stand up the MCP
+	// servers declared in an agent definition (C02). Nil skips MCP init.
+	MCPConnector MCPConnector
 }
 
 // ThinkingConfig controls extended thinking behavior.

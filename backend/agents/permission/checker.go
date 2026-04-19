@@ -55,12 +55,32 @@ func NewChecker(ctx *agents.ToolPermissionContext, cwd string) *Checker {
 
 // Check evaluates whether a tool is allowed to run with the given input.
 // The evaluation chain is: deny → allow → ask → default behavior.
+//
+// Mode semantics (B10):
+//   - bypassPermissions / bypass_all (legacy): allow everything.
+//   - acceptEdits / auto_accept (legacy): allow everything (the finer-grained
+//     "edits only" gating lives in the future per-tool permission hooks).
+//   - plan: deny every tool that has no allow match — mirrors
+//     claude-code's plan-mode semantic where write-capable tools should not
+//     run without an explicit allow rule. Read-only tools must rely on the
+//     rule chain / default-allow as before.
+//   - auto: Currently behaves like `default` (the classifier belongs to
+//     Phase D E06). Surfacing the constant keeps serialisation stable.
 func (c *Checker) Check(toolName string, input json.RawMessage, toolCtx *agents.ToolUseContext) *Result {
+	mode := NormalizeMode(c.mode)
+
+	// B04 · per-invocation override. The sub-agent context can pin a
+	// narrower mode (e.g. Plan) than the parent; we honour it here so
+	// callers don't need to mutate the shared ToolPermissionContext.
+	if toolCtx != nil && toolCtx.Options.AgentPermissionMode != "" {
+		mode = NormalizeMode(Mode(toolCtx.Options.AgentPermissionMode))
+	}
+
 	// Bypass mode
-	if c.mode == ModeBypassAll {
+	if mode == ModeBypassPermissions {
 		return &Result{Behavior: "allow"}
 	}
-	if c.mode == ModeAutoAccept {
+	if mode == ModeAcceptEdits {
 		return &Result{Behavior: "allow"}
 	}
 
@@ -75,6 +95,16 @@ func (c *Checker) Check(toolName string, input json.RawMessage, toolCtx *agents.
 	// Step 2: Check allow rules
 	if c.matchesRules(toolName, input, c.allowRules) {
 		return &Result{Behavior: "allow"}
+	}
+
+	// Step 2b: Plan mode — mutating tools must match an allow rule or be
+	// denied outright. This mirrors claude-code's plan mode guard which
+	// hard-denies file writes regardless of non-interactive defaults.
+	if mode == ModePlan && isMutatingTool(toolName) {
+		return &Result{
+			Behavior: "deny",
+			Message:  "Denied by plan mode (" + toolName + " cannot modify state in plan mode)",
+		}
 	}
 
 	// Step 3: Check ask rules
@@ -93,6 +123,27 @@ func (c *Checker) Check(toolName string, input json.RawMessage, toolCtx *agents.
 
 	// For server-side usage, default to allow (SDK mode)
 	return &Result{Behavior: "allow"}
+}
+
+// planModeMutatingTools enumerates the tool names that plan mode blocks
+// unless the user has explicitly allow-listed them. Matches the TS
+// EDIT-style denies: any write-capable tool is off-limits.
+var planModeMutatingTools = map[string]struct{}{
+	"Edit":          {},
+	"Write":         {},
+	"NotebookEdit":  {},
+	"Bash":          {},
+	"PowerShell":    {},
+	"EnterWorktree": {},
+	"ExitWorktree":  {},
+}
+
+// isMutatingTool reports whether toolName performs state mutation for the
+// purposes of plan-mode blocking. Conservative: anything not in the allow
+// list is considered mutating so future tools default to "deny under plan".
+func isMutatingTool(toolName string) bool {
+	_, ok := planModeMutatingTools[toolName]
+	return ok
 }
 
 // matchesRules checks if any rule in the given ruleset matches the tool/input.

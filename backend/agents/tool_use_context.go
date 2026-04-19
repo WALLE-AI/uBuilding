@@ -112,17 +112,70 @@ type ToolUseContext struct {
 	// their MCP client pool; nil = tool calls error out with "no MCP registry".
 	McpResources McpResourceRegistry
 
+	// --- A18 · fields needed by runAgent / fork / resume (Phase B+D) --------
+
+	// ToolUseID is the id of the parent tool_use that spawned this ToolUseContext,
+	// when one exists. Used to attribute async-agent notifications back to the
+	// assistant tool_use block (maps to `toolUseContext.toolUseId` in TS).
+	ToolUseID string
+
+	// RenderedSystemPrompt holds the parent's already-rendered system prompt
+	// bytes when available. Fork subagents reuse these verbatim to preserve
+	// prompt-cache hits (see forkSubagent.ts — `override.systemPrompt`).
+	// Empty string means "recompute under the child's cwd".
+	RenderedSystemPrompt string
+
+	// ContentReplacementState is the per-session state used by the tool-result
+	// budget pipeline to decide which tool results to collapse. Cloned by
+	// createSubagentContext so fork children make identical decisions as the
+	// parent (cache stability). Kept opaque via interface{} to avoid a cycle
+	// on compact/tool_result_budget.
+	ContentReplacementState interface{}
+
+	// SetAppStateForTasks is the "always reach the root store" channel used
+	// by async agents. When the parent is itself an async agent, its
+	// SetAppState is a no-op, but task registration / kill must still reach
+	// the root — hosts wire this to the root store's setter.
+	SetAppStateForTasks func(f func(prev *AppState) *AppState)
+
+	// LocalDenialTracking is a per-agent denial counter used when SetAppState
+	// is isolated (async subagents). Kept as interface{} to dodge imports.
+	LocalDenialTracking interface{}
+
+	// UpdateAttributionState is safe-to-share even when SetAppState is
+	// stubbed (pure functional update). Used by analytics / attribution.
+	UpdateAttributionState func(f func(prev interface{}) interface{})
+
+	// UpdateFileHistoryState mirrors the TS updateFileHistoryState callback
+	// so file-mutating tools can record snapshots. Nil = disabled.
+	UpdateFileHistoryState func(f func(prev FileHistoryState) FileHistoryState)
+
+	// PreserveToolUseResults requests that the engine keep toolUseResult on
+	// streamed messages (used by in-process teammates with viewable
+	// transcripts). Mirrors `toolUseContext.preserveToolUseResults`.
+	PreserveToolUseResults bool
+
+	// CriticalSystemReminder is an optional short string re-injected at every
+	// user turn (mirrors `agentDefinition.criticalSystemReminder_EXPERIMENTAL`
+	// threaded through createSubagentContext).
+	CriticalSystemReminder string
+
 	// InProgressToolUseIDs tracks currently executing tool IDs.
 	inProgressMu         sync.Mutex
 	inProgressToolUseIDs map[string]struct{}
 }
 
 // SubAgentParams configures a subagent query spawned via SpawnSubAgent.
+// Mirrors the subset of the TS AgentTool Input relevant to sync dispatch.
 type SubAgentParams struct {
 	Description  string
 	Prompt       string
 	SubagentType string
 	MaxTurns     int
+
+	// Model is an optional override (alias or concrete id) passed through to
+	// GetAgentModel. Empty string means "use the agent definition / parent".
+	Model string
 }
 
 // ToolUseOptions holds engine-level configuration accessible during tool execution.
@@ -142,6 +195,19 @@ type ToolUseOptions struct {
 	AgentDefinitions        *AgentDefinitions
 	McpClients              []MCPClient
 	Theme                   string
+
+	// --- B04 · permission mode overlay for sub-agents ----------------------
+
+	// AgentPermissionMode, when non-empty, overrides the effective
+	// permission mode for a sub-agent's tool calls without mutating the
+	// parent's ToolPermissionContext. Consumed by permission.Check.
+	AgentPermissionMode string
+
+	// ShouldAvoidPermissionPromptsOverride, when true, forces
+	// ShouldAvoidPermissionPrompts=true for this context regardless of
+	// AppState. Async sub-agents set this so the permission checker
+	// short-circuits instead of hanging on an interactive prompt.
+	ShouldAvoidPermissionPromptsOverride bool
 }
 
 // SetInProgressToolUseIDs safely updates the in-progress tool use set.
@@ -298,16 +364,6 @@ type FileSnapshot struct {
 	MessageUUID string `json:"message_uuid,omitempty"`
 }
 
-// AgentDefinitions holds active and allowed agent types.
-type AgentDefinitions struct {
-	ActiveAgents      []AgentDef `json:"active_agents,omitempty"`
-	AllAgents         []AgentDef `json:"all_agents,omitempty"`
-	AllowedAgentTypes []string   `json:"allowed_agent_types,omitempty"`
-}
-
-// AgentDef represents a single agent definition.
-type AgentDef struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description,omitempty"`
-}
+// AgentDef / AgentDefinitions now live in agent_definition.go. They were
+// extracted so the full BaseAgentDefinition model from claude-code-main can
+// live next to its builder/loader siblings without bloating this file.
