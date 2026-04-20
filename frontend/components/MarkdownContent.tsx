@@ -13,8 +13,8 @@ interface MarkdownContentProps {
 export default function MarkdownContent({ content, variant = "default" }: MarkdownContentProps) {
   const isThinking = variant === "thinking";
 
-  const textColor = isThinking ? "text-gray-400/80" : "text-gray-100";
-  const mutedColor = isThinking ? "text-gray-500/80" : "text-gray-400";
+  const textColor = isThinking ? "text-gray-400/80" : "text-slate-800";
+  const mutedColor = isThinking ? "text-gray-500/80" : "text-slate-500";
   const italicClass = isThinking ? "italic" : "";
 
   return (
@@ -31,7 +31,7 @@ export default function MarkdownContent({ content, variant = "default" }: Markdo
                   className={`${
                     isThinking
                       ? "bg-gray-800/60 text-gray-300/80"
-                      : "bg-gray-700 text-pink-300"
+                      : "bg-slate-100 text-indigo-700"
                   } px-1 py-0.5 rounded text-xs font-mono not-italic`}
                   {...props}
                 >
@@ -87,14 +87,14 @@ export default function MarkdownContent({ content, variant = "default" }: Markdo
           /* ── Inline formatting ────────────────────────────────────────── */
           strong({ children }) {
             return (
-              <strong className={`font-semibold not-italic ${isThinking ? "text-gray-300/90" : "text-white"}`}>
+              <strong className={`font-semibold not-italic ${isThinking ? "text-gray-300/90" : "text-slate-900"}`}>
                 {children}
               </strong>
             );
           },
           em({ children }) {
             return (
-              <em className={`italic ${isThinking ? "text-gray-400/80" : "text-gray-200"}`}>
+              <em className={`italic ${isThinking ? "text-gray-400/80" : "text-slate-700"}`}>
                 {children}
               </em>
             );
@@ -110,7 +110,7 @@ export default function MarkdownContent({ content, variant = "default" }: Markdo
                 className={`underline underline-offset-2 ${
                   isThinking
                     ? "text-indigo-400/70 hover:text-indigo-300/70"
-                    : "text-indigo-400 hover:text-indigo-300"
+                    : "text-indigo-600 hover:text-indigo-500"
                 } transition-colors`}
               >
                 {children}
@@ -166,11 +166,11 @@ export default function MarkdownContent({ content, variant = "default" }: Markdo
             return <tbody>{children}</tbody>;
           },
           tr({ children }) {
-            return <tr className="border-b border-gray-700/50">{children}</tr>;
+            return <tr className={`border-b ${isThinking ? "border-gray-700/50" : "border-slate-200"}`}>{children}</tr>;
           },
           th({ children }) {
             return (
-              <th className="px-3 py-1.5 text-left font-medium text-gray-300 bg-gray-700/40">
+              <th className={`px-3 py-1.5 text-left font-medium ${isThinking ? "text-gray-300 bg-gray-700/40" : "text-slate-700 bg-slate-100"}`}>
                 {children}
               </th>
             );

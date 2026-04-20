@@ -38,38 +38,54 @@ export default function InputBar({ onSend, status, connected, disabled }: InputB
   const isDisabled = disabled || status === "streaming" || !connected;
 
   return (
-    <div className="border-t border-gray-800 px-4 py-4 bg-gray-950">
-      {!connected && (
-        <div className="flex items-center gap-2 text-yellow-500 text-xs mb-2">
-          <WifiOff size={12} />
-          <span>正在重连后端...</span>
+    <div className="bg-white border-t border-slate-100 px-6 py-4">
+      <div className="max-w-4xl mx-auto">
+        {/* White card input */}
+        <div className="bg-white rounded-[20px] shadow-sm border border-slate-200 focus-within:shadow-md focus-within:border-indigo-200 transition-all">
+          <textarea
+            ref={ref}
+            rows={1}
+            placeholder={connected ? "发送消息…" : "等待连接..."}
+            disabled={isDisabled}
+            onKeyDown={handleKey}
+            onInput={handleInput}
+            className="w-full bg-transparent border-none outline-none focus:outline-none focus:ring-0 text-slate-700 placeholder-slate-400 p-4 min-h-[60px] max-h-[200px] resize-none text-[15px] rounded-t-[20px] disabled:opacity-50"
+          />
+          {/* Bottom toolbar */}
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-2">
+              {!connected && (
+                <span className="flex items-center gap-1.5 text-xs text-amber-500">
+                  <WifiOff size={12} />
+                  正在重连...
+                </span>
+              )}
+              {connected && (
+                <span className="text-xs text-slate-300">
+                  Enter 发送&nbsp;·&nbsp;Shift+Enter 换行
+                </span>
+              )}
+            </div>
+            <button
+              onClick={handleSend}
+              disabled={isDisabled}
+              className="bg-indigo-600 hover:bg-indigo-500 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed p-2 rounded-xl text-white transition-all shadow-sm shadow-indigo-500/20"
+              title={status === "streaming" ? "正在生成..." : "发送消息"}
+            >
+              {status === "streaming" ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Send size={18} />
+              )}
+            </button>
+          </div>
         </div>
-      )}
-      <div className="flex items-end gap-3 bg-gray-800 rounded-2xl px-4 py-3 border border-gray-700 focus-within:border-indigo-500 transition-colors">
-        <textarea
-          ref={ref}
-          rows={1}
-          placeholder={connected ? "输入消息… (Enter 发送，Shift+Enter 换行)" : "等待连接..."}
-          disabled={isDisabled}
-          onKeyDown={handleKey}
-          onInput={handleInput}
-          className="flex-1 bg-transparent text-gray-100 placeholder-gray-500 text-sm resize-none outline-none min-h-[24px] max-h-[200px] disabled:opacity-50"
-        />
-        <button
-          onClick={handleSend}
-          disabled={isDisabled}
-          className="flex-shrink-0 w-8 h-8 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center transition-colors"
-        >
-          {status === "streaming" ? (
-            <Loader2 size={14} className="text-white animate-spin" />
-          ) : (
-            <Send size={14} className="text-white" />
-          )}
-        </button>
+
+        {/* Disclaimer */}
+        <p className="text-xs text-slate-300 text-center mt-2">
+          AI 回复内容仅供参考，请自行核实。
+        </p>
       </div>
-      <p className="text-xs text-gray-600 text-center mt-2">
-        AI 回复内容仅供参考，请自行核实。
-      </p>
     </div>
   );
 }

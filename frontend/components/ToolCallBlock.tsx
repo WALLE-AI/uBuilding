@@ -35,15 +35,15 @@ export default function ToolCallBlock({ name, status, input, result }: ToolCallB
   const resultIsError = result ? isErrorResult(result) : false;
 
   return (
-    <div className="my-2 border border-orange-900/40 rounded-lg bg-gray-900/60 overflow-hidden">
+    <div className="my-2 border border-orange-200 rounded-lg bg-orange-50/30 overflow-hidden">
       <button
         onClick={() => hasDetails && setExpanded((v) => !v)}
         className={`w-full flex items-center gap-2 px-3 py-2 text-left transition-colors ${
-          hasDetails ? "hover:bg-gray-800/50 cursor-pointer" : "cursor-default"
+          hasDetails ? "hover:bg-orange-50 cursor-pointer" : "cursor-default"
         }`}
       >
         <Wrench size={13} className="flex-shrink-0 text-orange-400" />
-        <span className="text-xs text-orange-300/90 font-medium font-mono flex-1 truncate">
+        <span className="text-xs text-orange-700 font-medium font-mono flex-1 truncate">
           {name}
         </span>
         {status === "running" ? (
@@ -55,29 +55,29 @@ export default function ToolCallBlock({ name, status, input, result }: ToolCallB
         )}
         {hasDetails && status === "done" && (
           expanded ? (
-            <ChevronDown size={13} className="text-gray-500 flex-shrink-0" />
+            <ChevronDown size={13} className="text-slate-400 flex-shrink-0" />
           ) : (
-            <ChevronRight size={13} className="text-gray-500 flex-shrink-0" />
+            <ChevronRight size={13} className="text-slate-400 flex-shrink-0" />
           )
         )}
       </button>
 
       {expanded && (
-        <div className="border-t border-orange-900/20 divide-y divide-orange-900/10">
+        <div className="border-t border-orange-100 divide-y divide-orange-100">
           {input && input !== "null" && input !== "{}" && (
             <div className="px-3 py-2">
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">输入参数</p>
-              <pre className="text-xs text-gray-300 font-mono whitespace-pre-wrap break-all leading-relaxed">
+              <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">输入参数</p>
+              <pre className="text-xs text-slate-700 font-mono whitespace-pre-wrap break-all leading-relaxed">
                 {tryPrettyJson(input)}
               </pre>
             </div>
           )}
           {result && (
             <div className="px-3 py-2">
-              <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">执行结果</p>
+              <p className="text-[10px] text-slate-400 uppercase tracking-wider mb-1">执行结果</p>
               <pre
                 className={`text-xs font-mono whitespace-pre-wrap break-all leading-relaxed ${
-                  resultIsError ? "text-red-300" : "text-gray-300"
+                  resultIsError ? "text-red-500" : "text-slate-700"
                 }`}
               >
                 {tryPrettyJson(result)}

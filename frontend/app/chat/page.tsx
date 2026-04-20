@@ -54,6 +54,8 @@ export default function ChatPage() {
     [updateTitle]
   );
 
+  const activeTitle = conversations.find((c) => c.id === activeId)?.title ?? null;
+
   return (
     <div className="flex h-full">
       <Sidebar
@@ -64,15 +66,10 @@ export default function ChatPage() {
         onDelete={handleDelete}
         onRename={handleRename}
       />
-      <main className="flex-1 flex flex-col min-w-0 bg-gray-950">
-        <header className="flex-shrink-0 px-6 py-3 border-b border-gray-800 flex items-center justify-between">
-          <h1 className="text-sm font-semibold text-gray-300">
-            {conversations.find((c) => c.id === activeId)?.title ?? "Agent Chat"}
-          </h1>
-          <span className="text-xs text-gray-600">WALL-AI · uBuilding</span>
-        </header>
+      <main className="flex-1 flex flex-col min-w-0 bg-white overflow-hidden">
         <ChatDialog
           conversationId={activeId}
+          title={activeTitle}
           onTitleUpdated={handleTitleUpdated}
         />
       </main>

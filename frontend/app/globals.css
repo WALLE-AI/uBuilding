@@ -29,6 +29,15 @@ pre {
   font-size: 0.875em;
 }
 
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.msg-enter {
+  animation: fadeSlideIn 0.2s ease-out both;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }

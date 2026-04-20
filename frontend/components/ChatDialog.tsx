@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { MessageSquare } from "lucide-react";
 import MessageList from "./MessageList";
 import InputBar from "./InputBar";
 import { useWebSocket } from "@/hooks/useWebSocket";
@@ -9,10 +10,11 @@ import type { Message, StreamBlock } from "@/types/chat";
 
 interface ChatDialogProps {
   conversationId: string | null;
+  title?: string | null;
   onTitleUpdated?: (id: string, title: string) => void;
 }
 
-export default function ChatDialog({ conversationId, onTitleUpdated }: ChatDialogProps) {
+export default function ChatDialog({ conversationId, title, onTitleUpdated }: ChatDialogProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [streamBlocks, setStreamBlocks] = useState<StreamBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -144,10 +146,22 @@ export default function ChatDialog({ conversationId, onTitleUpdated }: ChatDialo
 
   if (!conversationId) {
     return (
-      <div className="flex-1 flex items-center justify-center text-gray-600">
-        <div className="text-center">
-          <p className="text-lg">选择或创建一个对话</p>
-          <p className="text-sm mt-1 text-gray-700">点击左侧「新对话」开始</p>
+      <div className="flex-1 flex flex-col">
+        {/* Header placeholder */}
+        <header className="h-14 border-b border-slate-100 flex items-center px-6 bg-white/80 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+              <MessageSquare size={16} className="text-indigo-600" />
+            </div>
+            <span className="font-semibold text-slate-400 text-sm">Agent Chat</span>
+          </div>
+          <span className="ml-auto text-xs text-slate-300">WALL-AI · uBuilding</span>
+        </header>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center space-y-2">
+            <p className="text-base text-slate-400">选择或创建一个对话</p>
+            <p className="text-sm text-slate-300">点击左侧「新对话」开始</p>
+          </div>
         </div>
       </div>
     );
@@ -155,6 +169,29 @@ export default function ChatDialog({ conversationId, onTitleUpdated }: ChatDialo
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
+      {/* Header */}
+      <header className="h-14 border-b border-slate-100 flex items-center px-6 bg-white/80 backdrop-blur-md shrink-0 z-10">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
+            <MessageSquare size={16} className="text-indigo-600" />
+          </div>
+          <span className="font-semibold text-slate-800 text-sm truncate max-w-xs">
+            {title ?? "Agent Chat"}
+          </span>
+        </div>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="flex items-center gap-1.5 text-xs text-slate-400">
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                connected ? "bg-emerald-500" : "bg-amber-400 animate-pulse"
+              }`}
+            />
+            {connected ? "已连接" : "连接中..."}
+          </span>
+          <span className="text-xs text-slate-300">WALL-AI · uBuilding</span>
+        </div>
+      </header>
+
       <MessageList
         messages={messages}
         streamBlocks={streamBlocks}

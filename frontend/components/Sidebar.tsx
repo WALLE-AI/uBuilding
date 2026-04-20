@@ -39,79 +39,98 @@ export default function Sidebar({
   const cancelEdit = () => setEditingId(null);
 
   return (
-    <aside className="w-64 flex-shrink-0 flex flex-col bg-gray-900 border-r border-gray-800 h-full">
-      <div className="p-4 border-b border-gray-800">
+    <aside className="w-64 flex-shrink-0 flex flex-col bg-slate-50 border-r border-slate-200 h-full">
+      {/* Brand header */}
+      <div className="h-14 px-5 flex items-center justify-between border-b border-slate-200 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-sm shadow-indigo-500/30">
+            <MessageSquare size={14} className="text-white" />
+          </div>
+          <span className="font-semibold text-slate-800 text-sm">Agent Chat</span>
+        </div>
+      </div>
+
+      {/* New conversation button */}
+      <div className="px-3 pt-3 pb-2">
         <button
           onClick={onNew}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-[0.98] text-white text-sm font-medium transition-all shadow-sm shadow-indigo-500/20"
         >
-          <Plus size={16} />
+          <Plus size={15} />
           新对话
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-2">
-        {conversations.length === 0 && (
-          <p className="text-gray-500 text-xs text-center mt-8 px-4">
-            暂无对话记录
+      {/* Conversation list */}
+      <div className="flex-1 overflow-y-auto px-2 pb-2">
+        {conversations.length === 0 ? (
+          <p className="text-slate-400 text-xs text-center mt-8 px-4 leading-relaxed">
+            暂无对话记录<br />点击「新对话」开始
           </p>
-        )}
-        {conversations.map((conv) => (
-          <div
-            key={conv.id}
-            className={`group relative flex items-center gap-2 mx-2 mb-1 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
-              activeId === conv.id
-                ? "bg-gray-700 text-white"
-                : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
-            }`}
-            onClick={() => onSelect(conv.id)}
-          >
-            <MessageSquare size={14} className="flex-shrink-0" />
-
-            {editingId === conv.id ? (
-              <div className="flex-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                <input
-                  autoFocus
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitEdit();
-                    if (e.key === "Escape") cancelEdit();
-                  }}
-                  className="flex-1 bg-gray-600 text-white text-sm rounded px-1 py-0.5 outline-none min-w-0"
+        ) : (
+          <div className="space-y-0.5 mt-1">
+            {conversations.map((conv) => (
+              <div
+                key={conv.id}
+                className={`group relative flex items-center gap-2.5 rounded-xl px-3 py-2.5 cursor-pointer transition-all ${
+                  activeId === conv.id
+                    ? "bg-white shadow-sm border border-slate-200 text-slate-800"
+                    : "text-slate-500 hover:bg-white hover:text-slate-700 hover:shadow-sm hover:border hover:border-slate-200"
+                }`}
+                onClick={() => onSelect(conv.id)}
+              >
+                <MessageSquare
+                  size={13}
+                  className={`flex-shrink-0 ${activeId === conv.id ? "text-indigo-500" : "text-slate-400"}`}
                 />
-                <button onClick={commitEdit} className="text-green-400 hover:text-green-300">
-                  <Check size={12} />
-                </button>
-                <button onClick={cancelEdit} className="text-gray-400 hover:text-gray-300">
-                  <X size={12} />
-                </button>
+
+                {editingId === conv.id ? (
+                  <div className="flex-1 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      autoFocus
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitEdit();
+                        if (e.key === "Escape") cancelEdit();
+                      }}
+                      className="flex-1 bg-slate-100 border border-slate-300 text-slate-800 text-sm rounded-lg px-2 py-0.5 outline-none focus:border-indigo-300 min-w-0 transition-colors"
+                    />
+                    <button onClick={commitEdit} className="text-emerald-500 hover:text-emerald-600 transition-colors">
+                      <Check size={12} />
+                    </button>
+                    <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600 transition-colors">
+                      <X size={12} />
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <span className="flex-1 text-sm truncate">{conv.title}</span>
+                    <div className="hidden group-hover:flex items-center gap-0.5">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startEdit(conv); }}
+                        className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                      >
+                        <Edit2 size={11} />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
+                        className="p-1 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
-            ) : (
-              <>
-                <span className="flex-1 text-sm truncate">{conv.title}</span>
-                <div className="hidden group-hover:flex items-center gap-1">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startEdit(conv); }}
-                    className="p-0.5 rounded hover:text-white"
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
-                    className="p-0.5 rounded hover:text-red-400"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              </>
-            )}
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
-      <div className="p-3 border-t border-gray-800">
-        <p className="text-xs text-gray-600 text-center">Agent Chat v0.1</p>
+      {/* Footer */}
+      <div className="px-4 py-3 border-t border-slate-200 shrink-0">
+        <p className="text-xs text-slate-400 text-center">WALL-AI · uBuilding v0.1</p>
       </div>
     </aside>
   );
