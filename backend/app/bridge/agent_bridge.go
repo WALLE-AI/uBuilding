@@ -3,6 +3,7 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -20,20 +21,33 @@ import (
 
 // WSMessage is the envelope sent over WebSocket connections.
 type WSMessage struct {
-	Type           string `json:"type"`
-	Content        string `json:"content,omitempty"`
-	ConversationID string `json:"conversation_id,omitempty"`
-	MessageID      string `json:"message_id,omitempty"`
-	ToolID         string `json:"tool_id,omitempty"`
-	ToolName       string `json:"tool_name,omitempty"`
+	Type           string   `json:"type"`
+	Content        string   `json:"content,omitempty"`
+	ConversationID string   `json:"conversation_id,omitempty"`
+	MessageID      string   `json:"message_id,omitempty"`
+	ToolID         string   `json:"tool_id,omitempty"`
+	ToolName       string   `json:"tool_name,omitempty"`
+	RequestID      string   `json:"request_id,omitempty"`
+	Options        []string `json:"options,omitempty"`
 }
+
+// AskUserHandlerFn is the callback signature for human-in-the-loop questions.
+type AskUserHandlerFn func(ctx context.Context, payload agents.AskUserPayload) (agents.AskUserResponse, error)
+
+// EmitEventHandlerFn is the callback signature for ancillary tool events.
+type EmitEventHandlerFn func(ev agents.StreamEvent)
 
 // SessionPool manages one QueryEngine per conversation.
 type SessionPool struct {
-	mu       sync.Mutex
-	sessions map[string]*agents.QueryEngine
-	cfg      *config.Config
-	prov     provider.Provider
+	mu                sync.Mutex
+	sessions          map[string]*agents.QueryEngine
+	cfg               *config.Config
+	askUserHandlers   sync.Map // convID → AskUserHandlerFn
+	emitEventHandlers sync.Map // convID → EmitEventHandlerFn
+	prov              provider.Provider
+
+	wsMu          sync.RWMutex
+	workspacePath string
 }
 
 func NewSessionPool(cfg *config.Config) (*SessionPool, error) {
@@ -47,11 +61,46 @@ func NewSessionPool(cfg *config.Config) (*SessionPool, error) {
 	if err != nil {
 		return nil, err
 	}
+	initialCwd, _ := os.Getwd()
 	return &SessionPool{
-		sessions: make(map[string]*agents.QueryEngine),
-		cfg:      cfg,
-		prov:     p,
+		sessions:      make(map[string]*agents.QueryEngine),
+		cfg:           cfg,
+		prov:          p,
+		workspacePath: initialCwd,
 	}, nil
+}
+
+// GetWorkspace returns the current global workspace path.
+func (sp *SessionPool) GetWorkspace() string {
+	sp.wsMu.RLock()
+	defer sp.wsMu.RUnlock()
+	return sp.workspacePath
+}
+
+// SetWorkspace updates the global workspace path. Returns an error if the
+// path does not exist on disk. All existing sessions are evicted so that the
+// next GetOrCreate call rebuilds engines with the new cwd and tool roots.
+func (sp *SessionPool) SetWorkspace(path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("workspace path does not exist: %w", err)
+	}
+	sp.wsMu.Lock()
+	sp.workspacePath = path
+	sp.wsMu.Unlock()
+	sp.mu.Lock()
+	sp.sessions = make(map[string]*agents.QueryEngine)
+	sp.mu.Unlock()
+	return nil
+}
+
+// SetAskUserHandler registers a per-conversation callback for AskUserQuestion.
+func (sp *SessionPool) SetAskUserHandler(convID string, fn AskUserHandlerFn) {
+	sp.askUserHandlers.Store(convID, fn)
+}
+
+// SetEmitEventHandler registers a per-conversation callback for ancillary tool events.
+func (sp *SessionPool) SetEmitEventHandler(convID string, fn EmitEventHandlerFn) {
+	sp.emitEventHandlers.Store(convID, fn)
 }
 
 // GetOrCreate returns an existing engine for the conversation or creates a new one.
@@ -63,7 +112,7 @@ func (sp *SessionPool) GetOrCreate(conversationID string) *agents.QueryEngine {
 		return e
 	}
 
-	cwd, _ := os.Getwd()
+	cwd := sp.GetWorkspace()
 
 	// ── A: tool registry (platform-aware: Windows → PowerShell aliased as "Bash") ──
 	reg := tool.NewRegistry()
@@ -174,6 +223,17 @@ func (sp *SessionPool) GetOrCreate(conversationID string) *agents.QueryEngine {
 				Options: agents.ToolUseOptions{
 					MainLoopModel: sp.cfg.EngineModel,
 					Tools:         toolIfaces,
+				},
+				AskUser: func(askCtx context.Context, payload agents.AskUserPayload) (agents.AskUserResponse, error) {
+					if v, ok := sp.askUserHandlers.Load(conversationID); ok {
+						return v.(AskUserHandlerFn)(askCtx, payload)
+					}
+					return agents.AskUserResponse{}, fmt.Errorf("no AskUser handler for session %s", conversationID)
+				},
+				EmitEvent: func(ev agents.StreamEvent) {
+					if v, ok := sp.emitEventHandlers.Load(conversationID); ok {
+						v.(EmitEventHandlerFn)(ev)
+					}
 				},
 			}
 		}),

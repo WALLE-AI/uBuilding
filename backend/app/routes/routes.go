@@ -26,5 +26,9 @@ func Register(r *gin.Engine, pool *bridge.SessionPool) {
 		api.GET("/conversations/:id", convHandler.Get)
 		api.PATCH("/conversations/:id/title", convHandler.UpdateTitle)
 		api.DELETE("/conversations/:id", convHandler.Delete)
+
+		wsHandler := &handlers.WorkspaceHandler{Pool: pool}
+		api.GET("/workspace", wsHandler.Get)
+		api.PUT("/workspace", wsHandler.Set)
 	}
 }

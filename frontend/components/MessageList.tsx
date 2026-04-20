@@ -5,12 +5,15 @@ import { Sparkles } from "lucide-react";
 import type { Message, StreamBlock } from "@/types/chat";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
+import TodoListBlock from "./TodoListBlock";
+import AskQuestionBlock from "./AskQuestionBlock";
 import MarkdownContent from "./MarkdownContent";
 
 interface MessageListProps {
   messages: Message[];
   streamBlocks: StreamBlock[];
   isStreaming: boolean;
+  onAnswerQuestion?: (requestId: string, answer: string) => void;
 }
 
 /* ── Avatar helpers ──────────────────────────────────────────────────────── */
@@ -33,7 +36,15 @@ function UserAvatar() {
 
 /* ── Streaming blocks renderer ───────────────────────────────────────────── */
 
-function StreamBlocksRenderer({ blocks, isStreaming }: { blocks: StreamBlock[]; isStreaming: boolean }) {
+function StreamBlocksRenderer({
+  blocks,
+  isStreaming,
+  onAnswerQuestion,
+}: {
+  blocks: StreamBlock[];
+  isStreaming: boolean;
+  onAnswerQuestion?: (requestId: string, answer: string) => void;
+}) {
   const hasText = blocks.some((b) => b.type === "text");
   const isLastBlock = (idx: number) => idx === blocks.length - 1;
 
@@ -57,6 +68,27 @@ function StreamBlocksRenderer({ blocks, isStreaming }: { blocks: StreamBlock[]; 
               status={block.status}
               input={block.input}
               result={block.result}
+            />
+          );
+        }
+        if (block.type === "todo") {
+          return (
+            <TodoListBlock
+              key={`todo-${block.id}`}
+              todos={block.todos}
+              status={block.status}
+            />
+          );
+        }
+        if (block.type === "ask_question") {
+          return (
+            <AskQuestionBlock
+              key={`ask-${block.requestId}`}
+              requestId={block.requestId}
+              question={block.question}
+              options={block.options}
+              answered={block.answered}
+              onAnswer={onAnswerQuestion ?? (() => {})}
             />
           );
         }
@@ -91,7 +123,7 @@ function StreamBlocksRenderer({ blocks, isStreaming }: { blocks: StreamBlock[]; 
 
 /* ── Main component ──────────────────────────────────────────────────────── */
 
-export default function MessageList({ messages, streamBlocks, isStreaming }: MessageListProps) {
+export default function MessageList({ messages, streamBlocks, isStreaming, onAnswerQuestion }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -142,7 +174,7 @@ export default function MessageList({ messages, streamBlocks, isStreaming }: Mes
           <div className="msg-enter flex gap-4 justify-start">
             <AssistantAvatar />
             <div className="w-full max-w-2xl">
-              <StreamBlocksRenderer blocks={streamBlocks} isStreaming={isStreaming} />
+              <StreamBlocksRenderer blocks={streamBlocks} isStreaming={isStreaming} onAnswerQuestion={onAnswerQuestion} />
             </div>
           </div>
         )}

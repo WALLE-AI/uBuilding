@@ -11,6 +11,8 @@ interface UseWebSocketOptions {
   onThinkingDelta?: (text: string) => void;
   onToolUse?: (id: string, name: string, input: string) => void;
   onToolResult?: (toolId: string, content: string) => void;
+  onTodoUpdate?: (id: string, name: string, input: string) => void;
+  onAskQuestion?: (requestId: string, question: string, options: string[]) => void;
 }
 
 export function useWebSocket(opts: UseWebSocketOptions) {
@@ -63,6 +65,16 @@ export function useWebSocket(opts: UseWebSocketOptions) {
         case "tool_result":
           optsRef.current.onToolResult?.(msg.tool_id ?? "", msg.content ?? "");
           break;
+        case "todo_update":
+          optsRef.current.onTodoUpdate?.(msg.tool_id ?? "", msg.tool_name ?? "", msg.content ?? "");
+          break;
+        case "ask_question":
+          optsRef.current.onAskQuestion?.(
+            msg.request_id ?? "",
+            msg.content ?? "",
+            msg.options ?? [],
+          );
+          break;
       }
     };
   }, []);
@@ -82,10 +94,17 @@ export function useWebSocket(opts: UseWebSocketOptions) {
     );
   }, []);
 
+  const sendQuestionReply = useCallback((requestId: string, answer: string) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(
+      JSON.stringify({ type: "question_reply", request_id: requestId, content: answer })
+    );
+  }, []);
+
   const requestNewConversation = useCallback(() => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: "new_conversation" }));
   }, []);
 
-  return { sendChat, requestNewConversation, status, connected };
+  return { sendChat, requestNewConversation, sendQuestionReply, status, connected };
 }

@@ -36,3 +36,36 @@ export async function updateConversationTitle(id: string, title: string): Promis
     body: JSON.stringify({ title }),
   });
 }
+
+export async function getWorkspace(): Promise<string> {
+  const res = await fetch(`${BASE}/api/workspace`);
+  if (!res.ok) return "";
+  const text = await res.text();
+  try {
+    const data = JSON.parse(text);
+    return data?.workspace ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export async function setWorkspace(path: string): Promise<string> {
+  const res = await fetch(`${BASE}/api/workspace`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace: path }),
+  });
+  const text = await res.text();
+  let data: Record<string, string> = {};
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(
+      res.ok
+        ? "响应格式错误，请确认后端服务正常运行"
+        : `请求失败 (${res.status})`
+    );
+  }
+  if (!res.ok) throw new Error(data?.error ?? "设置工作空间失败");
+  return data?.workspace ?? path;
+}

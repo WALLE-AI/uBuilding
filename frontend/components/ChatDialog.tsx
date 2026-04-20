@@ -6,7 +6,7 @@ import MessageList from "./MessageList";
 import InputBar from "./InputBar";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { fetchMessages } from "@/utils/api";
-import type { Message, StreamBlock } from "@/types/chat";
+import type { Message, StreamBlock, TodoItem } from "@/types/chat";
 
 interface ChatDialogProps {
   conversationId: string | null;
@@ -85,6 +85,34 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
     );
   }, [applyUpdate]);
 
+  const handleTodoUpdate = useCallback((id: string, _name: string, input: string) => {
+    try {
+      const parsed = JSON.parse(input) as { todos?: TodoItem[] };
+      const todos: TodoItem[] = parsed.todos ?? [];
+      applyUpdate((prev) => {
+        const idx = prev.findIndex((b) => b.type === "todo" && b.id === id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { type: "todo", id, todos, status: "running" as const };
+          return updated;
+        }
+        return [...prev, { type: "todo", id, todos, status: "running" as const }];
+      });
+    } catch {
+      // malformed input — ignore
+    }
+  }, [applyUpdate]);
+
+  const handleAskQuestion = useCallback(
+    (requestId: string, question: string, options: string[]) => {
+      applyUpdate((prev) => [
+        ...prev,
+        { type: "ask_question", requestId, question, options: options.length ? options : undefined },
+      ]);
+    },
+    [applyUpdate]
+  );
+
   const handleDone = useCallback((messageId: string) => {
     setIsStreaming(false);
     const blocks = streamBlocksRef.current;
@@ -115,7 +143,7 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
 
   const handleConversationId = useCallback(() => {}, []);
 
-  const { sendChat, status, connected } = useWebSocket({
+  const { sendChat, sendQuestionReply, status, connected } = useWebSocket({
     onToken: handleToken,
     onDone: handleDone,
     onError: handleError,
@@ -123,7 +151,23 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
     onThinkingDelta: handleThinkingDelta,
     onToolUse: handleToolUse,
     onToolResult: handleToolResult,
+    onTodoUpdate: handleTodoUpdate,
+    onAskQuestion: handleAskQuestion,
   });
+
+  const handleAnswerQuestion = useCallback(
+    (requestId: string, answer: string) => {
+      sendQuestionReply(requestId, answer);
+      applyUpdate((prev) =>
+        prev.map((b) =>
+          b.type === "ask_question" && b.requestId === requestId
+            ? { ...b, answered: answer }
+            : b
+        )
+      );
+    },
+    [sendQuestionReply, applyUpdate]
+  );
 
   const handleSend = useCallback(
     (content: string) => {
@@ -196,6 +240,7 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
         messages={messages}
         streamBlocks={streamBlocks}
         isStreaming={isStreaming}
+        onAnswerQuestion={handleAnswerQuestion}
       />
       <InputBar
         onSend={handleSend}
