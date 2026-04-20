@@ -1,68 +1,16 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import ReactMarkdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Bot, User } from "lucide-react";
 import type { Message, StreamBlock } from "@/types/chat";
 import ThinkingBlock from "./ThinkingBlock";
 import ToolCallBlock from "./ToolCallBlock";
+import MarkdownContent from "./MarkdownContent";
 
 interface MessageListProps {
   messages: Message[];
   streamBlocks: StreamBlock[];
   isStreaming: boolean;
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  return (
-    <div className="prose-chat text-sm leading-relaxed">
-      <ReactMarkdown
-        components={{
-          code({ className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className || "");
-            const isBlock = !!match;
-            return isBlock ? (
-              <SyntaxHighlighter
-                style={oneDark as Record<string, React.CSSProperties>}
-                language={match[1]}
-                PreTag="div"
-                className="!my-2 !rounded-lg !text-xs"
-              >
-                {String(children).replace(/\n$/, "")}
-              </SyntaxHighlighter>
-            ) : (
-              <code
-                className="bg-gray-700 text-pink-300 px-1 py-0.5 rounded text-xs font-mono"
-                {...props}
-              >
-                {children}
-              </code>
-            );
-          },
-          p({ children }) {
-            return <p className="mb-2 last:mb-0">{children}</p>;
-          },
-          ul({ children }) {
-            return <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>;
-          },
-          ol({ children }) {
-            return <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>;
-          },
-          blockquote({ children }) {
-            return (
-              <blockquote className="border-l-2 border-indigo-500 pl-3 text-gray-400 italic my-2">
-                {children}
-              </blockquote>
-            );
-          },
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
 }
 
 function StreamBlocksRenderer({ blocks, isStreaming }: { blocks: StreamBlock[]; isStreaming: boolean }) {

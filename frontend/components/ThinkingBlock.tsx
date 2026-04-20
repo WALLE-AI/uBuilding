@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Brain, ChevronDown, ChevronRight } from "lucide-react";
+import MarkdownContent from "./MarkdownContent";
 
 interface ThinkingBlockProps {
   content: string;
@@ -45,9 +46,7 @@ export default function ThinkingBlock({ content, streaming }: ThinkingBlockProps
 
       {(expanded || streaming) && content && (
         <div className="px-3 pb-3 pt-1 border-t border-purple-900/30">
-          <pre className="text-xs text-gray-400/80 italic font-mono whitespace-pre-wrap leading-relaxed">
-            {content}
-          </pre>
+          <MarkdownContent content={content} variant="thinking" />
         </div>
       )}
     </div>
