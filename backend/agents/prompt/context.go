@@ -1,6 +1,7 @@
 package prompt
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wall-ai/ubuilding/backend/agents"
+	"github.com/wall-ai/ubuilding/backend/agents/memory"
 )
 
 // ---------------------------------------------------------------------------
@@ -63,21 +67,44 @@ func (s *SystemContext) ToMap() map[string]string {
 // Context is computed once and memoized for the duration of the conversation.
 // Maps to the memoize(getUserContext) and memoize(getSystemContext) in context.ts.
 type ContextProvider struct {
-	cwd              string
-	claudeMdDirs     []string // additional directories for CLAUDE.md discovery
-	disableClaudeMd  bool
-	disableGit       bool
+	cwd             string
+	claudeMdDirs    []string // additional directories for CLAUDE.md discovery
+	disableClaudeMd bool
+	disableGit      bool
 
-	userOnce    sync.Once
-	userCtx     *UserContext
-	systemOnce  sync.Once
-	systemCtx   *SystemContext
+	// memLoaderCfg, when non-nil, activates the new memory module path.
+	// GetUserContext uses memory.GetMemoryFiles + memory.BuildUserContextClaudeMd
+	// instead of the legacy loadClaudeMdFiles walker.
+	memLoaderCfg *memory.LoaderConfig
+
+	// memRenderOpts overrides the default ClaudeMdRenderOptions used
+	// by BuildUserContextClaudeMd. Nil uses sensible defaults.
+	memRenderOpts *memory.ClaudeMdRenderOptions
+
+	// engineCfg is needed by LoadMemoryMechanicsPrompt for feature-gate
+	// checks (auto/team memory enabled). Zero value disables memory.
+	engineCfg agents.EngineConfig
+
+	// settings is the SettingsProvider for memory path resolution.
+	settings memory.SettingsProvider
+
+	userOnce   sync.Once
+	userCtx    *UserContext
+	systemOnce sync.Once
+	systemCtx  *SystemContext
+
+	// memFilesOnce guards the lazy memory-file load so GetCachedMemoryFiles
+	// can be called from multiple goroutines.
+	memFilesOnce sync.Once
+	memFiles     []memory.MemoryFileInfo
+	memFilesErr  error
 }
 
 // NewContextProvider creates a new context provider for the given working directory.
 func NewContextProvider(cwd string, opts ...ContextProviderOption) *ContextProvider {
 	cp := &ContextProvider{
-		cwd: cwd,
+		cwd:      cwd,
+		settings: memory.NopSettingsProvider,
 	}
 	for _, opt := range opts {
 		opt(cp)
@@ -109,8 +136,45 @@ func WithDisableGit(disable bool) ContextProviderOption {
 	}
 }
 
+// WithMemoryLoaderConfig activates the new memory module path. When set,
+// GetUserContext calls memory.GetMemoryFiles + memory.BuildUserContextClaudeMd
+// instead of the legacy loadClaudeMdFiles walker.
+func WithMemoryLoaderConfig(cfg memory.LoaderConfig) ContextProviderOption {
+	return func(cp *ContextProvider) {
+		cp.memLoaderCfg = &cfg
+	}
+}
+
+// WithMemoryRenderOptions overrides the default ClaudeMdRenderOptions.
+func WithMemoryRenderOptions(opts memory.ClaudeMdRenderOptions) ContextProviderOption {
+	return func(cp *ContextProvider) {
+		cp.memRenderOpts = &opts
+	}
+}
+
+// WithEngineConfig sets the engine configuration for memory feature gating.
+func WithEngineConfig(cfg agents.EngineConfig) ContextProviderOption {
+	return func(cp *ContextProvider) {
+		cp.engineCfg = cfg
+	}
+}
+
+// WithSettingsProvider sets the SettingsProvider for memory path resolution.
+func WithSettingsProvider(s memory.SettingsProvider) ContextProviderOption {
+	return func(cp *ContextProvider) {
+		if s != nil {
+			cp.settings = s
+		}
+	}
+}
+
 // GetUserContext returns the memoized user context.
 // Maps to getUserContext() in context.ts.
+//
+// When WithMemoryLoaderConfig was applied, the ClaudeMd field is
+// populated via memory.GetMemoryFiles → memory.BuildUserContextClaudeMd.
+// Otherwise the legacy loadClaudeMdFiles walker is used for backward
+// compatibility.
 func (cp *ContextProvider) GetUserContext() *UserContext {
 	cp.userOnce.Do(func() {
 		ctx := &UserContext{
@@ -118,9 +182,20 @@ func (cp *ContextProvider) GetUserContext() *UserContext {
 		}
 
 		if !cp.disableClaudeMd {
-			claudeMd := loadClaudeMdFiles(cp.cwd, cp.claudeMdDirs)
-			if claudeMd != "" {
-				ctx.ClaudeMd = claudeMd
+			if cp.memLoaderCfg != nil {
+				// New memory module path.
+				files, _ := cp.loadMemoryFiles()
+				opts := cp.renderOptions()
+				claudeMd := memory.BuildUserContextClaudeMd(files, opts)
+				if claudeMd != "" {
+					ctx.ClaudeMd = claudeMd
+				}
+			} else {
+				// Legacy path.
+				claudeMd := loadClaudeMdFiles(cp.cwd, cp.claudeMdDirs)
+				if claudeMd != "" {
+					ctx.ClaudeMd = claudeMd
+				}
 			}
 		}
 
@@ -153,6 +228,66 @@ func (cp *ContextProvider) Clear() {
 	cp.userCtx = nil
 	cp.systemOnce = sync.Once{}
 	cp.systemCtx = nil
+	cp.memFilesOnce = sync.Once{}
+	cp.memFiles = nil
+	cp.memFilesErr = nil
+}
+
+// ---------------------------------------------------------------------------
+// Memory module integration — M8 prompt injection wiring.
+// ---------------------------------------------------------------------------
+
+// loadMemoryFiles lazily loads memory files via memory.GetMemoryFiles
+// and caches the result. Thread-safe via memFilesOnce.
+func (cp *ContextProvider) loadMemoryFiles() ([]memory.MemoryFileInfo, error) {
+	cp.memFilesOnce.Do(func() {
+		if cp.memLoaderCfg == nil {
+			return
+		}
+		cp.memFiles, cp.memFilesErr = memory.GetMemoryFiles(
+			context.Background(), *cp.memLoaderCfg)
+	})
+	return cp.memFiles, cp.memFilesErr
+}
+
+// renderOptions returns the ClaudeMdRenderOptions to use. If the caller
+// supplied explicit options via WithMemoryRenderOptions those are used;
+// otherwise sensible defaults (RelativeTo=cwd) are returned.
+func (cp *ContextProvider) renderOptions() memory.ClaudeMdRenderOptions {
+	if cp.memRenderOpts != nil {
+		return *cp.memRenderOpts
+	}
+	return memory.ClaudeMdRenderOptions{
+		RelativeTo: cp.cwd,
+	}
+}
+
+// GetCachedMemoryFiles returns the loaded memory files, or nil when the
+// memory module path is not active. The result is cached — calling this
+// multiple times returns the same slice. Useful for diagnostics like
+// GetLargeMemoryFiles and for telemetry hooks.
+func (cp *ContextProvider) GetCachedMemoryFiles() []memory.MemoryFileInfo {
+	if cp.memLoaderCfg == nil {
+		return nil
+	}
+	files, _ := cp.loadMemoryFiles()
+	return files
+}
+
+// LoadMemoryMechanicsPrompt loads the memory-mechanics system prompt
+// section via memory.LoadMemoryPrompt. This is the "how to save/read
+// memories" instruction block that goes into GetSystemPromptConfig.MemoryPrompt
+// or FullBuildConfig.MemoryMechanicsPrompt.
+//
+// Returns "" when auto-memory is disabled or paths cannot be resolved.
+func (cp *ContextProvider) LoadMemoryMechanicsPrompt() string {
+	promptStr, _ := memory.LoadMemoryPrompt(
+		context.Background(),
+		cp.cwd,
+		cp.engineCfg,
+		cp.settings,
+	)
+	return promptStr
 }
 
 // ---------------------------------------------------------------------------

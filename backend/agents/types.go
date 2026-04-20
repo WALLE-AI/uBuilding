@@ -455,6 +455,33 @@ type EngineConfig struct {
 	// unset and override Cwd alone.
 	AgentMemoryConfig AgentMemoryConfig
 
+	// --- memory module alignment (M-phase) -------------------------------
+	//
+	// The following opt-in toggles gate the CLAUDE.md / MEMORY.md / team-
+	// memory / session-memory subsystems ported from claude-code-main.
+	// Every field defaults to its zero value (off) so existing hosts see
+	// no behavioural change until they explicitly opt in.
+
+	// AutoMemoryEnabled turns on the auto-memory (memdir) subsystem: the
+	// self-managed MEMORY.md entrypoint under <configHome>/projects/…
+	// plus its daily-log companion. Consumed by
+	// `memory.IsAutoMemoryEnabled`. Environment overrides
+	// (`UBUILDING_ENABLE_AUTO_MEMORY` / `UBUILDING_DISABLE_AUTO_MEMORY`)
+	// take precedence over this field.
+	AutoMemoryEnabled bool
+
+	// TeamMemoryEnabled turns on the team-memory prompt + tool carve-outs
+	// for `<autoMemPath>/team/`. Implies AutoMemoryEnabled. Consumed by
+	// `memory.IsTeamMemoryEnabled` (M6). Environment override:
+	// `UBUILDING_ENABLE_TEAM_MEMORY`.
+	TeamMemoryEnabled bool
+
+	// SessionMemoryEnabled turns on the session-memory subsystem (notes.md
+	// scratchpad + post-sampling extraction hook + SM-compact bridge).
+	// Consumed by the `session_memory` package (M10-M12). Environment
+	// override: `UBUILDING_ENABLE_SESSION_MEMORY`.
+	SessionMemoryEnabled bool
+
 	// ResolveAgentSkill, when non-nil, turns an agent frontmatter skill
 	// name into content blocks that SpawnSubAgent pre-pends to the sub-
 	// agent's conversation as a meta user message (C06).
