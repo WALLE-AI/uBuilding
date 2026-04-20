@@ -622,7 +622,11 @@ func QueryLoop(ctx context.Context, params QueryParams, deps QueryDeps, ch chan<
 
 		// Emit tool_use events for each tool block
 		for _, block := range toolUseBlocks {
-			ch <- StreamEvent{Type: EventToolUse, Text: block.Name}
+			ch <- StreamEvent{
+				Type:    EventToolUse,
+				Text:    block.Name,
+				ToolUse: &ToolUseEvent{ID: block.ID, Name: block.Name, Input: block.Input},
+			}
 		}
 
 		// Delegate to deps.ExecuteTools (wired to tool/orchestration or streaming_executor)
