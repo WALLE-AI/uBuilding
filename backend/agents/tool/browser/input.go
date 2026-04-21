@@ -79,6 +79,7 @@ const (
 	ActionScreenshot        = "screenshot"
 	ActionScreenshotElement = "screenshot_element"
 	ActionPDF               = "pdf"
+	ActionSaveBase64        = "save_base64"
 
 	// Download
 	ActionWaitDownloadStart = "wait_download_start"
@@ -254,6 +255,7 @@ type Input struct {
 	ScreenshotPath string `json:"screenshot_path,omitempty"`
 	Quality        int    `json:"quality,omitempty"`
 	Format         string `json:"format,omitempty"`
+	Data           string `json:"data,omitempty"`
 
 	// --- Download ---
 	DownloadDir string `json:"download_dir,omitempty"`

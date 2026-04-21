@@ -197,18 +197,26 @@ func (t *BrowserTool) doScreenshot(in *Input) string {
 		return fmt.Sprintf("screenshot failed: %v", err)
 	}
 
-	// Save to file if path provided
-	if in.ScreenshotPath != "" {
-		dir := filepath.Dir(in.ScreenshotPath)
+	// Determine save path: explicit > auto-generated > base64 fallback
+	saveTo := resolveWorkspacePath(in.ScreenshotPath)
+	if saveTo == "" {
+		ext := "png"
+		if in.Format == "jpeg" || in.Format == "jpg" {
+			ext = "jpg"
+		}
+		saveTo = autoScreenshotPath(ext)
+	}
+	if saveTo != "" {
+		dir := filepath.Dir(saveTo)
 		_ = os.MkdirAll(dir, 0o755)
-		err = os.WriteFile(in.ScreenshotPath, data, 0o644)
+		err = os.WriteFile(saveTo, data, 0o644)
 		if err != nil {
 			return fmt.Sprintf("screenshot captured but save failed: %v", err)
 		}
-		return fmt.Sprintf("Screenshot saved: %s (%d bytes)", in.ScreenshotPath, len(data))
+		return fmt.Sprintf("Screenshot saved: %s (%d bytes)", saveTo, len(data))
 	}
 
-	// Return as base64
+	// Workspace not set — return as base64
 	b64 := base64.StdEncoding.EncodeToString(data)
 	if len(b64) > 100000 {
 		b64 = b64[:100000] + "... (truncated)"
@@ -231,14 +239,18 @@ func (t *BrowserTool) doScreenshotElement(in *Input) string {
 		return fmt.Sprintf("screenshot_element failed: %v", err)
 	}
 
-	if in.ScreenshotPath != "" {
-		dir := filepath.Dir(in.ScreenshotPath)
+	elSaveTo := resolveWorkspacePath(in.ScreenshotPath)
+	if elSaveTo == "" {
+		elSaveTo = autoScreenshotPath("png")
+	}
+	if elSaveTo != "" {
+		dir := filepath.Dir(elSaveTo)
 		_ = os.MkdirAll(dir, 0o755)
-		err = os.WriteFile(in.ScreenshotPath, data, 0o644)
+		err = os.WriteFile(elSaveTo, data, 0o644)
 		if err != nil {
 			return fmt.Sprintf("screenshot captured but save failed: %v", err)
 		}
-		return fmt.Sprintf("Element screenshot saved: %s (%d bytes)", in.ScreenshotPath, len(data))
+		return fmt.Sprintf("Element screenshot saved: %s (%d bytes)", elSaveTo, len(data))
 	}
 
 	b64 := base64.StdEncoding.EncodeToString(data)
@@ -260,9 +272,9 @@ func (t *BrowserTool) doPDF(in *Input) string {
 		return fmt.Sprintf("pdf failed: %v", err)
 	}
 
-	savePath := in.SavePath
+	savePath := resolveWorkspacePath(in.SavePath)
 	if savePath == "" {
-		savePath = in.ScreenshotPath
+		savePath = resolveWorkspacePath(in.ScreenshotPath)
 	}
 	if savePath != "" {
 		dir := filepath.Dir(savePath)
@@ -285,7 +297,7 @@ func (t *BrowserTool) doSetupDownload(in *Input) string {
 	if err != nil {
 		return errStr(err)
 	}
-	dir := in.DownloadDir
+	dir := resolveWorkspacePath(in.DownloadDir)
 	if dir == "" {
 		dir = filepath.Join(os.TempDir(), "browser_downloads")
 	}
@@ -361,4 +373,31 @@ func (t *BrowserTool) doSnapshot(in *Input) string {
 		lines = append(lines, fmt.Sprintf("Snapshot error: %v", err))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (t *BrowserTool) doSaveBase64(in *Input) string {
+	if in.Data == "" {
+		return "Error: data field is required for save_base64"
+	}
+	saveTo := resolveWorkspacePath(in.SavePath)
+	if saveTo == "" {
+		saveTo = resolveWorkspacePath(in.ScreenshotPath)
+	}
+	if saveTo == "" {
+		return "Error: save_path (or screenshot_path) is required for save_base64"
+	}
+	decoded, err := base64.StdEncoding.DecodeString(in.Data)
+	if err != nil {
+		// Try URL-safe base64 as fallback
+		decoded, err = base64.URLEncoding.DecodeString(in.Data)
+		if err != nil {
+			return fmt.Sprintf("Error: base64 decode failed: %v", err)
+		}
+	}
+	dir := filepath.Dir(saveTo)
+	_ = os.MkdirAll(dir, 0o755)
+	if err = os.WriteFile(saveTo, decoded, 0o644); err != nil {
+		return fmt.Sprintf("Error: write failed: %v", err)
+	}
+	return fmt.Sprintf("Saved: %s (%d bytes)", saveTo, len(decoded))
 }

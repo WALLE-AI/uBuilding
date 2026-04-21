@@ -2,8 +2,14 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+
+	"github.com/wall-ai/ubuilding/backend/agents/tool/cwd"
 )
 
 func TestNewBrowserTool(t *testing.T) {
@@ -279,4 +285,144 @@ func TestCleanupIdleEmpty(t *testing.T) {
 	if len(mgr.ListSessions()) != 0 {
 		t.Error("expected 0 sessions after cleanupIdle on empty manager")
 	}
+}
+
+func TestResolveWorkspacePath(t *testing.T) {
+	// Save and restore global cwd state.
+	oldCwd := cwd.Get()
+	defer cwd.Set(oldCwd)
+
+	var ws string
+	if runtime.GOOS == "windows" {
+		ws = `C:\Users\test\workspace`
+	} else {
+		ws = "/home/test/workspace"
+	}
+
+	tests := []struct {
+		name string
+		cwd  string
+		path string
+		want string
+	}{
+		{"empty path", ws, "", ""},
+		{"absolute path unchanged", ws, filepath.Join(ws, "file.png"), filepath.Join(ws, "file.png")},
+		{"relative resolved to workspace", ws, filepath.Join("screenshots", "shot.png"), filepath.Join(ws, "screenshots", "shot.png")},
+		{"cwd empty returns relative as-is", "", filepath.Join("screenshots", "shot.png"), filepath.Join("screenshots", "shot.png")},
+		{"bare filename resolved", ws, "file.png", filepath.Join(ws, "file.png")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cwd.Set(tt.cwd)
+			got := resolveWorkspacePath(tt.path)
+			if got != tt.want {
+				t.Errorf("resolveWorkspacePath(%q) = %q, want %q (cwd=%q)", tt.path, got, tt.want, tt.cwd)
+			}
+		})
+	}
+}
+
+func TestAutoScreenshotPath(t *testing.T) {
+	oldCwd := cwd.Get()
+	defer cwd.Set(oldCwd)
+
+	t.Run("returns empty when workspace not set", func(t *testing.T) {
+		cwd.Set("")
+		got := autoScreenshotPath("png")
+		if got != "" {
+			t.Errorf("expected empty, got %q", got)
+		}
+	})
+
+	t.Run("generates path inside workspace/screenshots", func(t *testing.T) {
+		ws := t.TempDir()
+		cwd.Set(ws)
+		got := autoScreenshotPath("png")
+		if got == "" {
+			t.Fatal("expected non-empty path")
+		}
+		if !filepath.IsAbs(got) {
+			t.Errorf("expected absolute path, got %q", got)
+		}
+		if filepath.Base(filepath.Dir(got)) != "screenshots" {
+			t.Errorf("expected parent dir 'screenshots', got %q", filepath.Base(filepath.Dir(got)))
+		}
+		if filepath.Ext(got) != ".png" {
+			t.Errorf("expected .png extension, got %q", filepath.Ext(got))
+		}
+	})
+
+	t.Run("uses jpg extension", func(t *testing.T) {
+		ws := t.TempDir()
+		cwd.Set(ws)
+		got := autoScreenshotPath("jpg")
+		if filepath.Ext(got) != ".jpg" {
+			t.Errorf("expected .jpg extension, got %q", filepath.Ext(got))
+		}
+	})
+}
+
+func TestSaveBase64Action(t *testing.T) {
+	oldCwd := cwd.Get()
+	defer cwd.Set(oldCwd)
+
+	ws := t.TempDir()
+	cwd.Set(ws)
+
+	bt := New()
+	ctx := context.Background()
+
+	t.Run("saves decoded bytes to workspace-relative path", func(t *testing.T) {
+		payload := []byte("hello browser test")
+		b64 := base64.StdEncoding.EncodeToString(payload)
+
+		input := map[string]interface{}{
+			"action":    "save_base64",
+			"data":      b64,
+			"save_path": "out/test.bin",
+		}
+		raw, _ := json.Marshal(input)
+		result, err := bt.Call(ctx, raw, nil)
+		if err != nil {
+			t.Fatalf("save_base64 call failed: %v", err)
+		}
+		text := result.Data.(string)
+		t.Logf("save_base64 result: %s", text)
+
+		dest := filepath.Join(ws, "out", "test.bin")
+		got, readErr := os.ReadFile(dest)
+		if readErr != nil {
+			t.Fatalf("file not found at %s: %v", dest, readErr)
+		}
+		if string(got) != string(payload) {
+			t.Errorf("content mismatch: got %q, want %q", got, payload)
+		}
+	})
+
+	t.Run("returns error when data is empty", func(t *testing.T) {
+		input := map[string]interface{}{
+			"action":    "save_base64",
+			"data":      "",
+			"save_path": "out/x.bin",
+		}
+		raw, _ := json.Marshal(input)
+		result, _ := bt.Call(ctx, raw, nil)
+		text := result.Data.(string)
+		if len(text) < 5 || text[:5] != "Error" {
+			t.Errorf("expected Error response, got %q", text)
+		}
+	})
+
+	t.Run("returns error when save_path missing", func(t *testing.T) {
+		input := map[string]interface{}{
+			"action": "save_base64",
+			"data":   base64.StdEncoding.EncodeToString([]byte("x")),
+		}
+		raw, _ := json.Marshal(input)
+		result, _ := bt.Call(ctx, raw, nil)
+		text := result.Data.(string)
+		if len(text) < 5 || text[:5] != "Error" {
+			t.Errorf("expected Error response, got %q", text)
+		}
+	})
 }

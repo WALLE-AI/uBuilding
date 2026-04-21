@@ -472,7 +472,7 @@ func (t *BrowserTool) doSaveMHTML(in *Input) string {
 	if err != nil {
 		return fmt.Sprintf("save_mhtml failed: %v", err)
 	}
-	savePath := in.SavePath
+	savePath := resolveWorkspacePath(in.SavePath)
 	if savePath == "" {
 		return fmt.Sprintf("MHTML captured (%d bytes). Provide save_path to write.", len(res.Data))
 	}

@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
+	"time"
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
 
 	"github.com/wall-ai/ubuilding/backend/agents"
 	"github.com/wall-ai/ubuilding/backend/agents/tool"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/cwd"
 )
 
 // BrowserTool implements tool.Tool for DrissionPage-style browser automation.
@@ -105,6 +108,9 @@ func (t *BrowserTool) InputSchema() *tool.JSONSchema {
 			"disable_resources":        {Type: "boolean", Description: "Block fonts/images/media/stylesheets for speed (default false)."},
 			"blocked_domains":          {Type: "array", Description: "Custom domains to block."},
 			"block_ads":                {Type: "boolean", Description: "Block known ad/tracker domains (default false)."},
+			"data":                     {Type: "string", Description: "Base64-encoded binary payload for save_base64 action."},
+			"screenshot_path":          {Type: "string", Description: "File path to save screenshot (relative paths resolve to workspace). Omit to auto-save in workspace/screenshots/."},
+			"save_path":                {Type: "string", Description: "File path to save pdf/mhtml (relative paths resolve to workspace)."},
 		},
 		Required: []string{"action"},
 	}
@@ -331,6 +337,8 @@ func (t *BrowserTool) dispatch(ctx context.Context, in *Input) string {
 		return t.doScreenshotElement(in)
 	case ActionPDF:
 		return t.doPDF(in)
+	case ActionSaveBase64:
+		return t.doSaveBase64(in)
 
 	// --- Download ---
 	case ActionSetupDownload:
@@ -491,6 +499,33 @@ func (t *BrowserTool) getSessionAndPage(in *Input) (*BrowserSession, *rod.Page, 
 		return nil, nil, fmt.Errorf("no active page in session %s", s.ID)
 	}
 	return s, p, nil
+}
+
+// resolveWorkspacePath resolves p relative to the workspace (cwd.Get()).
+// Absolute paths are returned as-is. Empty strings are returned as-is.
+func resolveWorkspacePath(p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	ws := cwd.Get()
+	if ws == "" {
+		return p
+	}
+	return filepath.Join(ws, p)
+}
+
+// autoScreenshotPath generates a timestamped screenshot path inside the workspace.
+// Returns "" if the workspace is not set (callers should fall back to base64).
+func autoScreenshotPath(ext string) string {
+	ws := cwd.Get()
+	if ws == "" {
+		return ""
+	}
+	if ext == "" {
+		ext = "png"
+	}
+	ts := time.Now().UnixMilli()
+	return filepath.Join(ws, "screenshots", fmt.Sprintf("shot_%d.%s", ts, ext))
 }
 
 // errStr formats an error as tool output.
