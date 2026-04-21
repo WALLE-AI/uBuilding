@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/wall-ai/ubuilding/backend/agents/tool/cwd"
 )
 
 // Spec describes a command to be executed.
@@ -71,6 +73,9 @@ func Run(ctx context.Context, spec Spec) (*Result, error) {
 
 	cmd := exec.CommandContext(runCtx, spec.Cmd, spec.Args...)
 	cmd.Cancel = func() error { return killProcess(cmd) }
+	if spec.Cwd == "" {
+		spec.Cwd = cwd.Get()
+	}
 	if spec.Cwd != "" {
 		cmd.Dir = spec.Cwd
 	}

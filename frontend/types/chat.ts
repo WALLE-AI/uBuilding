@@ -42,6 +42,13 @@ export interface TodoItem {
   priority?: "high" | "medium" | "low";
 }
 
+export interface UploadedFile {
+  url: string;
+  name: string;
+  category: "images" | "videos" | "files";
+  localPreview?: string;
+}
+
 export type StreamBlock =
   | { type: "text"; content: string }
   | { type: "thinking"; content: string; streaming?: boolean }

@@ -205,6 +205,7 @@ func (e *QueryEngine) runQuery(ctx context.Context, prompt string, ch chan<- Str
 		TaskBudget:        e.config.TaskBudget,
 		FallbackModel:     e.config.FallbackModel,
 		OnCompactBoundary: e.config.OnCompactBoundary,
+		OnTurnEnd:         e.config.OnTurnEnd,
 	}
 
 	// 6. Run the query loop — collect events on an internal channel,
@@ -421,7 +422,16 @@ func (e *QueryEngine) buildSystemPrompt() (string, map[string]string, map[string
 			}
 			p += layer
 		}
-		return p, nil, nil
+		// Append current date to system prompt so the LLM always knows today's date.
+		now := time.Now()
+		dateStr := fmt.Sprintf("%04d-%02d-%02d", now.Year(), int(now.Month()), now.Day())
+		p += fmt.Sprintf("\n\nCurrent date: %s", dateStr)
+		// Also return userContext with currentDate so prependUserContext injects it
+		// into the first user message (matches the full prompt system behavior).
+		userCtx := map[string]string{
+			"currentDate": fmt.Sprintf("Today's date is %s.", dateStr),
+		}
+		return p, userCtx, nil
 	}
 
 	// --- Full prompt system path (Phase 4) ---

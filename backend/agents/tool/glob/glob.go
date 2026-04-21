@@ -17,6 +17,7 @@ import (
 
 	"github.com/wall-ai/ubuilding/backend/agents"
 	"github.com/wall-ai/ubuilding/backend/agents/tool"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/cwd"
 )
 
 // Name is the tool name exposed to the model.
@@ -114,11 +115,10 @@ func (t *Tool) Call(ctx context.Context, input json.RawMessage, _ *agents.ToolUs
 	}
 	root := in.Path
 	if root == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
+		root = cwd.Get()
+		if root == "" {
+			root, _ = os.Getwd()
 		}
-		root = cwd
 	}
 	abs, err := filepath.Abs(root)
 	if err != nil {

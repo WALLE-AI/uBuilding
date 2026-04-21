@@ -12,6 +12,7 @@ import (
 	"github.com/wall-ai/ubuilding/backend/agents/tool/bash"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/bg"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/brief"
+	"github.com/wall-ai/ubuilding/backend/agents/tool/browser"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/fileio"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/glob"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/grep"
@@ -112,6 +113,8 @@ func AllTools(opts ...Options) tool.Tools {
 		taskgraph.NewUpdateTool(),
 		taskgraph.NewListTool(),
 		agenttool.New(o.AgentToolOptions...),
+		// Browser automation tool (go-rod based).
+		browser.New(),
 	}
 	ts = append(ts, shellTool(o))
 	return ts

@@ -2,14 +2,16 @@ package routes
 
 import (
 	"net/http"
+	"path/filepath"
 
 	"github.com/gin-gonic/gin"
 	"github.com/wall-ai/ubuilding/backend/app/bridge"
+	"github.com/wall-ai/ubuilding/backend/app/config"
 	"github.com/wall-ai/ubuilding/backend/app/handlers"
 	"github.com/wall-ai/ubuilding/backend/app/middleware"
 )
 
-func Register(r *gin.Engine, pool *bridge.SessionPool) {
+func Register(r *gin.Engine, pool *bridge.SessionPool, cfg *config.Config) {
 	r.Use(middleware.CORS())
 
 	r.GET("/health", func(c *gin.Context) {
@@ -17,6 +19,15 @@ func Register(r *gin.Engine, pool *bridge.SessionPool) {
 	})
 
 	r.GET("/ws", (&handlers.ChatHandler{Pool: pool}).Handle)
+
+	r.GET("/uploads/*filepath", func(c *gin.Context) {
+		base := cfg.UploadDir
+		if ws := pool.GetWorkspace(); ws != "" {
+			base = filepath.Join(ws, "upload", "data")
+		}
+		rel := filepath.FromSlash(c.Param("filepath"))
+		c.File(filepath.Join(base, rel))
+	})
 
 	api := r.Group("/api")
 	{
@@ -30,5 +41,8 @@ func Register(r *gin.Engine, pool *bridge.SessionPool) {
 		wsHandler := &handlers.WorkspaceHandler{Pool: pool}
 		api.GET("/workspace", wsHandler.Get)
 		api.PUT("/workspace", wsHandler.Set)
+
+		uploadHandler := &handlers.UploadHandler{Pool: pool, DefaultUploadDir: cfg.UploadDir}
+		api.POST("/upload", uploadHandler.Handle)
 	}
 }

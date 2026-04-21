@@ -251,6 +251,12 @@ type QueryParams struct {
 	// prompt.SectionCache.Clear() to match TS clearSystemPromptSections()
 	// semantics. Nil means no-op.
 	OnCompactBoundary func()
+
+	// OnTurnEnd is a fire-and-forget callback invoked after each model
+	// turn completes (after stop hooks). It receives a snapshot of the
+	// current message list. Used by the memory extraction service.
+	// Nil means no-op.
+	OnTurnEnd func(messages []Message)
 }
 
 // TaskBudget configures a token budget for the entire task.
@@ -508,6 +514,12 @@ type EngineConfig struct {
 	// MCPConnector, when non-nil, lets SpawnSubAgent stand up the MCP
 	// servers declared in an agent definition (C02). Nil skips MCP init.
 	MCPConnector MCPConnector
+
+	// OnTurnEnd is a fire-and-forget callback invoked after each model
+	// turn completes (after stop hooks). It receives a snapshot of the
+	// current message list. Used by the memory extraction service to
+	// analyse the conversation in the background. Nil means no-op.
+	OnTurnEnd func(messages []Message)
 }
 
 // ThinkingConfig controls extended thinking behavior.

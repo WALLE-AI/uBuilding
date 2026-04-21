@@ -26,6 +26,9 @@ func Init(dbPath string) {
 		log.Fatalf("failed to connect database: %v", err)
 	}
 	log.Printf("[db] connected: %s", dbPath)
+
+	DB.Exec("PRAGMA journal_mode=WAL")
+	DB.Exec("PRAGMA synchronous=NORMAL")
 }
 
 func AutoMigrate(dst ...interface{}) {

@@ -32,7 +32,7 @@ func main() {
 	}
 
 	r := gin.Default()
-	routes.Register(r, pool)
+	routes.Register(r, pool, cfg)
 
 	addr := ":" + cfg.Port
 	slog.Info("server starting", "addr", addr)

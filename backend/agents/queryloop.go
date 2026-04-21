@@ -550,6 +550,11 @@ func QueryLoop(ctx context.Context, params QueryParams, deps QueryDeps, ch chan<
 			)
 
 			if stopResult.PreventContinuation {
+				// Fire OnTurnEnd (memory extraction) before returning.
+				// Must include assistantMsgs — state.Messages only has input messages.
+				if params.OnTurnEnd != nil {
+					params.OnTurnEnd(append(state.Messages, assistantMsgs...))
+				}
 				return Terminal{Reason: TerminalStopHookPrevented, TurnCount: state.TurnCount}
 			}
 
@@ -614,6 +619,11 @@ func QueryLoop(ctx context.Context, params QueryParams, deps QueryDeps, ch chan<
 				}
 			}
 
+			// Fire OnTurnEnd (memory extraction) before returning.
+			// Must include assistantMsgs — state.Messages only has input messages.
+			if params.OnTurnEnd != nil {
+				params.OnTurnEnd(append(state.Messages, assistantMsgs...))
+			}
 			return Terminal{Reason: TerminalCompleted, TurnCount: state.TurnCount}
 		}
 

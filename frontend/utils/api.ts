@@ -1,4 +1,4 @@
-import type { Conversation, Message } from "@/types/chat";
+import type { Conversation, Message, UploadedFile } from "@/types/chat";
 
 const BASE = "";
 
@@ -68,4 +68,15 @@ export async function setWorkspace(path: string): Promise<string> {
   }
   if (!res.ok) throw new Error(data?.error ?? "设置工作空间失败");
   return data?.workspace ?? path;
+}
+
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/api/upload`, { method: "POST", body: form });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { error?: string }).error ?? "上传失败");
+  }
+  return res.json() as Promise<UploadedFile>;
 }

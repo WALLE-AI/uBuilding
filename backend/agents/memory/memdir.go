@@ -43,11 +43,11 @@ const DirsExistGuidance = "Both directories already exist — write to them dire
 // EntrypointTruncation describes the result of a truncation pass so
 // callers can surface telemetry without re-inspecting the content.
 type EntrypointTruncation struct {
-	Content           string
-	LineCount         int
-	ByteCount         int
-	WasLineTruncated  bool
-	WasByteTruncated  bool
+	Content          string
+	LineCount        int
+	ByteCount        int
+	WasLineTruncated bool
+	WasByteTruncated bool
 }
 
 // TruncateEntrypointContent trims raw to fit within MaxEntrypointLines
@@ -117,7 +117,7 @@ func truncationReason(lineCount, byteCount int, byLine, byByte bool) string {
 }
 
 // formatFileSize mirrors the TS helper: returns bytes / KB / MB / GB.
-// Retains the `.toFixed(1).replace(/\.0$/, '')` behaviour — 1024 → "1KB",
+// Retains the `.toFixed(1).replace(/\.0$/, ”)` behaviour — 1024 → "1KB",
 // 1536 → "1.5KB".
 func formatFileSize(sizeInBytes int) string {
 	kb := float64(sizeInBytes) / 1024
@@ -201,6 +201,28 @@ func EnsureMemoryDirExists(path string) error {
 		return fmt.Errorf("memory: mkdir %q: %w", path, err)
 	}
 	return nil
+}
+
+// EnsureMemoryEntrypoint creates the auto-memory directory for cwd and
+// writes an empty MEMORY.md if the file does not yet exist. Idempotent —
+// safe to call on every session start. Returns nil when cwd's auto-mem
+// path cannot be resolved (auto-memory simply stays inactive).
+func EnsureMemoryEntrypoint(cwd string, settings SettingsProvider) error {
+	dir := GetAutoMemPath(cwd, settings)
+	if dir == "" {
+		return nil
+	}
+	if err := EnsureMemoryDirExists(dir); err != nil {
+		return err
+	}
+	entrypoint := GetAutoMemEntrypoint(cwd, settings)
+	if entrypoint == "" {
+		return nil
+	}
+	if _, err := os.Stat(entrypoint); err == nil {
+		return nil // already exists
+	}
+	return os.WriteFile(entrypoint, []byte(""), 0o600)
 }
 
 // init wires the truncation helper into the loader so

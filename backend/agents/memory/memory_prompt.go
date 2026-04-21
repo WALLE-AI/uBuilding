@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -238,6 +239,70 @@ func BuildCombinedMemoryPrompt(autoDir, teamDir string, extraGuidelines []string
 }
 
 // ---------------------------------------------------------------------------
+// M7.I2b · BuildAssistantDailyLogPrompt — long-session append-only mode.
+// ---------------------------------------------------------------------------
+
+// EnvEnableDailyLog gates the daily-log mode. When enabled AND
+// auto-memory is active, the model writes timestamped entries to
+// `logs/YYYY/MM/YYYY-MM-DD.md` instead of directly managing MEMORY.md.
+// A separate nightly process distils logs into MEMORY.md and topic files.
+const EnvEnableDailyLog = "UBUILDING_ENABLE_DAILY_LOG"
+
+// IsDailyLogEnabled reports whether daily-log mode is active.
+func IsDailyLogEnabled() bool {
+	return isEnvTruthy(os.Getenv(EnvEnableDailyLog))
+}
+
+// BuildAssistantDailyLogPrompt produces the daily-log variant of the
+// memory prompt. Mirrors TS `buildAssistantDailyLogPrompt` (KAIROS mode).
+//
+// Instead of two-step file+index management, the model appends
+// timestamped bullets to `logs/YYYY/MM/YYYY-MM-DD.md`. A separate
+// nightly process distils logs into MEMORY.md and topic files.
+func BuildAssistantDailyLogPrompt(memoryDir string, skipIndex bool) string {
+	logPathPattern := memoryDir + "/logs/YYYY/MM/YYYY-MM-DD.md"
+
+	lines := []string{
+		"# auto memory",
+		"",
+		fmt.Sprintf("You have a persistent, file-based memory system found at: `%s`", memoryDir),
+		"",
+		"This session is long-lived. As you work, record anything worth remembering by **appending** to today's daily log file:",
+		"",
+		fmt.Sprintf("`%s`", logPathPattern),
+		"",
+		"Substitute today's date (from `currentDate` in your context) for `YYYY-MM-DD`. When the date rolls over mid-session, start appending to the new day's file.",
+		"",
+		"Write each entry as a short timestamped bullet. Create the file (and parent directories) on first write if it does not exist. Do not rewrite or reorganize the log — it is append-only. A separate nightly process distills these logs into `MEMORY.md` and topic files.",
+		"",
+		"## What to log",
+		"- User corrections and preferences (\"use bun, not npm\"; \"stop summarizing diffs\")",
+		"- Facts about the user, their role, or their goals",
+		"- Project context that is not derivable from the code (deadlines, incidents, decisions and their rationale)",
+		"- Pointers to external systems (dashboards, Linear projects, Slack channels)",
+		"- Anything the user explicitly asks you to remember",
+		"",
+	}
+	lines = append(lines, WhatNotToSaveSection...)
+	lines = append(lines, "")
+
+	if !skipIndex {
+		lines = append(lines,
+			fmt.Sprintf("## %s", autoMemEntrypoint),
+			fmt.Sprintf("`%s` is the distilled index (maintained nightly from your logs) and is loaded into your context automatically. Read it for orientation, but do not edit it directly — record new information in today's log instead.",
+				autoMemEntrypoint),
+			"",
+		)
+	}
+
+	if SearchingPastContextBuilder != nil {
+		lines = append(lines, SearchingPastContextBuilder(memoryDir)...)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// ---------------------------------------------------------------------------
 // M7.I3 · LoadMemoryPrompt — dispatcher.
 // ---------------------------------------------------------------------------
 
@@ -262,10 +327,27 @@ func LoadMemoryPrompt(
 ) (string, error) {
 	_ = ctx
 	if !IsAutoMemoryEnabled(cfg, settings) {
+		slog.Default().Debug("memory: LoadMemoryPrompt — auto-memory disabled")
 		return "", nil
 	}
 	extraGuidelines := readExtraGuidelines()
 	skipIndex := isEnvTruthy(os.Getenv(EnvSkipMemoryIndex))
+
+	// Daily-log mode takes precedence over team memory: the append-only
+	// log paradigm does not compose with team sync (which expects a shared
+	// MEMORY.md that both sides read + write). Mirrors TS KAIROS gate.
+	if IsDailyLogEnabled() {
+		autoDir := GetAutoMemPath(cwd, settings)
+		slog.Default().Info("memory: LoadMemoryPrompt — dailyLog branch",
+			"autoDir", autoDir, "cwd", cwd)
+		if autoDir != "" {
+			cleanDir := strings.TrimRight(autoDir, string(os.PathSeparator))
+			if err := EnsureMemoryDirExists(cleanDir); err != nil {
+				debugf("EnsureMemoryDirExists(autoDir=%q): %v", cleanDir, err)
+			}
+			return BuildAssistantDailyLogPrompt(cleanDir, skipIndex), nil
+		}
+	}
 
 	// Team branch takes precedence when active.
 	if IsTeamMemoryEnabled(cfg, settings) {

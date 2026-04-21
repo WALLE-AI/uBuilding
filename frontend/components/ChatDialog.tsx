@@ -6,7 +6,7 @@ import MessageList from "./MessageList";
 import InputBar from "./InputBar";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { fetchMessages } from "@/utils/api";
-import type { Message, StreamBlock, TodoItem } from "@/types/chat";
+import type { Message, StreamBlock, TodoItem, UploadedFile } from "@/types/chat";
 
 interface ChatDialogProps {
   conversationId: string | null;
@@ -19,6 +19,9 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
   const [streamBlocks, setStreamBlocks] = useState<StreamBlock[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const streamBlocksRef = useRef<StreamBlock[]>([]);
+  const [pendingFiles, setPendingFiles] = useState<UploadedFile[]>([]);
+
+  const BACKEND_URL = "http://localhost:8080";
 
   const applyUpdate = useCallback((updater: (prev: StreamBlock[]) => StreamBlock[]) => {
     const next = updater(streamBlocksRef.current);
@@ -170,22 +173,32 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
   );
 
   const handleSend = useCallback(
-    (content: string) => {
+    (content: string, attachments: UploadedFile[]) => {
       if (!conversationId) return;
+
+      let fullContent = content;
+      if (attachments.length > 0) {
+        const refs = attachments
+          .map((f) => `[附件] ${f.name}: ${BACKEND_URL}${f.url}`)
+          .join("\n");
+        fullContent = content ? `${content}\n\n${refs}` : refs;
+      }
+
       const userMsg: Message = {
         id: crypto.randomUUID(),
         conversation_id: conversationId,
         role: "user",
-        content,
+        content: fullContent,
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, userMsg]);
+      setPendingFiles([]);
       streamBlocksRef.current = [];
       setStreamBlocks([]);
       setIsStreaming(true);
-      sendChat(conversationId, content);
+      sendChat(conversationId, fullContent);
     },
-    [conversationId, sendChat]
+    [conversationId, sendChat, BACKEND_URL]
   );
 
   if (!conversationId) {
@@ -247,6 +260,8 @@ export default function ChatDialog({ conversationId, title, onTitleUpdated }: Ch
         status={status}
         connected={connected}
         disabled={!conversationId}
+        pendingFiles={pendingFiles}
+        onFilesChange={setPendingFiles}
       />
     </div>
   );
