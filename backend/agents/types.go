@@ -482,6 +482,12 @@ type EngineConfig struct {
 	// `UBUILDING_ENABLE_TEAM_MEMORY`.
 	TeamMemoryEnabled bool
 
+	// AutoDreamEnabled turns on the background memory consolidation
+	// subsystem that periodically reviews and organises auto-memory
+	// files. Consumed by `memory.IsAutoDreamEnabled`. Environment
+	// override: `UBUILDING_ENABLE_AUTO_DREAM`.
+	AutoDreamEnabled bool
+
 	// SessionMemoryEnabled turns on the session-memory subsystem (notes.md
 	// scratchpad + post-sampling extraction hook + SM-compact bridge).
 	// Consumed by the `session_memory` package (M10-M12). Environment

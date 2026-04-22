@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/wall-ai/ubuilding/backend/agents/memory"
 	"github.com/wall-ai/ubuilding/backend/agents/prompt"
 	"github.com/wall-ai/ubuilding/backend/agents/provider"
+	sm "github.com/wall-ai/ubuilding/backend/agents/session_memory"
 	"github.com/wall-ai/ubuilding/backend/agents/tool"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/bg"
 	"github.com/wall-ai/ubuilding/backend/agents/tool/builtin"
@@ -332,8 +334,10 @@ func (sp *SessionPool) GetOrCreate(conversationID string) *agents.QueryEngine {
 		UserSpecifiedModel: sp.cfg.EngineModel,
 		MaxTurns:           sp.cfg.MaxTurns,
 
-		AutoMemoryEnabled: sp.cfg.AutoMemoryEnabled,
-		TeamMemoryEnabled: sp.cfg.TeamMemoryEnabled,
+		AutoMemoryEnabled:    sp.cfg.AutoMemoryEnabled,
+		TeamMemoryEnabled:    sp.cfg.TeamMemoryEnabled,
+		SessionMemoryEnabled: sp.cfg.SessionMemoryEnabled,
+		AutoDreamEnabled:     sp.cfg.AutoDreamEnabled,
 
 		// Full prompt system: CLAUDE.md hierarchy + memory mechanics prompt.
 		// Replaces the legacy BaseSystemPrompt single-string path.
@@ -359,15 +363,71 @@ func (sp *SessionPool) GetOrCreate(conversationID string) *agents.QueryEngine {
 	}
 	// ── G2: memory extraction service ──────────────────────────────────────────
 	extractSvc := memory.NewExtractMemoriesService(cwd, memory.NopSettingsProvider, memEngineCfg)
-	if extractSvc.IsEnabled() {
-		engineCfg.OnTurnEnd = func(messages []agents.Message) {
+
+	// ── G3: session memory extractor ──────────────────────────────────────────
+	var smExtractor *sm.SessionMemoryExtractor
+	if sp.cfg.SessionMemoryEnabled {
+		memBase := memory.GetMemoryBaseDir()
+		if memBase != "" {
+			sessionRoot := fmt.Sprintf("%s%csessions%c%s",
+				strings.TrimRight(memBase, string(os.PathSeparator)),
+				os.PathSeparator, os.PathSeparator, conversationID)
+			notesPath := sm.GetSessionMemoryPath(sessionRoot)
+			smExtractor = sm.NewSessionMemoryExtractor(
+				agents.EngineConfig{SessionMemoryEnabled: true},
+				sm.SideQueryFn(memory.DefaultSideQueryFn),
+				notesPath, "", nil,
+			)
+		}
+	}
+
+	// ── G4: auto-dream service ─────────────────────────────────────────────────
+	var bgMgr *agents.BackgroundTaskManager
+	if sp.cfg.AutoDreamEnabled {
+		bgMgr = agents.NewBackgroundTaskManager(slog.Default())
+		dreamSvc := memory.NewAutoDreamService(
+			cwd, conversationID, memEngineCfg, memory.NopSettingsProvider, slog.Default(),
+		)
+		bgMgr.RegisterFactory(agents.TaskTypeAutoDream, memory.AutoDreamTaskFactory(dreamSvc))
+	}
+
+	// ── G5: merged OnTurnEnd chain ─────────────────────────────────────────────
+	engineCfg.OnTurnEnd = func(messages []agents.Message) {
+		// Memory extraction (async)
+		if extractSvc.IsEnabled() {
 			extractSvc.OnTurnEnd(messages)
+		}
+
+		// Session memory extraction (sync, lightweight)
+		if smExtractor != nil {
+			tokenEstimate := estimateTokenCount(messages)
+			if smExtractor.ShouldExtractMemory(messages, tokenEstimate) {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+					defer cancel()
+					if err := smExtractor.Extract(ctx, messages, tokenEstimate); err != nil {
+						slog.Default().Warn("session_memory: extraction failed", "err", err)
+					}
+				}()
+			}
+		}
+
+		// AutoDream (async via BackgroundTaskManager)
+		if bgMgr != nil {
+			bgMgr.RunEndOfTurnTasks(agents.BackgroundTaskContext{
+				SessionID: conversationID,
+				Messages:  messages,
+				Cwd:       cwd,
+				Logger:    slog.Default(),
+			})
 		}
 	}
 
 	slog.Default().Info("memory: session config",
 		"autoMem", sp.cfg.AutoMemoryEnabled,
 		"extractMem", extractSvc.IsEnabled(),
+		"sessionMem", smExtractor != nil,
+		"autoDream", bgMgr != nil,
 		"cwd", cwd,
 		"memMechanics_len", len(ctxProvider.LoadMemoryMechanicsPrompt()),
 	)
@@ -419,6 +479,18 @@ func (sp *SessionPool) Remove(conversationID string) {
 	sp.mu.Lock()
 	delete(sp.sessions, conversationID)
 	sp.mu.Unlock()
+}
+
+// estimateTokenCount gives a rough token estimate for session memory threshold
+// gating. Uses ~4 chars per token heuristic.
+func estimateTokenCount(msgs []agents.Message) int {
+	total := 0
+	for _, m := range msgs {
+		for _, b := range m.Content {
+			total += len(b.Text)
+		}
+	}
+	return total / 4
 }
 
 // extractLastUserText returns the text of the last user message in the slice,

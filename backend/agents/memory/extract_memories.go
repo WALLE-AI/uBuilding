@@ -34,6 +34,24 @@ import (
 // EnvEnableExtractMemories gates the extraction system.
 const EnvEnableExtractMemories = "UBUILDING_ENABLE_EXTRACT_MEMORIES"
 
+// ExtractionContext holds the snapshot of messages for a pending extraction.
+type ExtractionContext struct {
+	Messages []agents.Message
+}
+
+// ExtractionResult holds the outcome of an extraction run.
+type ExtractionResult struct {
+	FilesWritten int
+	FilePaths    []string
+}
+
+// AppendSystemMessageFn is called after extraction completes to inject
+// a notification message into the main conversation.
+type AppendSystemMessageFn func(text string)
+
+// CanUseToolFn decides whether a tool call is allowed during extraction.
+type CanUseToolFn func(toolName, targetPath string) bool
+
 // ExtractMemoriesService manages background memory extraction.
 // It is goroutine-safe; the overlap guard ensures at most one
 // extraction runs at a time.
@@ -51,9 +69,22 @@ type ExtractMemoriesService struct {
 	// Overlap guard
 	inProgress bool
 
+	// Trailing run: queued context to run after current extraction finishes.
+	pendingCtx *ExtractionContext
+
+	// Drain support: closed to signal pending extractions should run and
+	// then allow graceful shutdown.
+	drainCh chan struct{}
+
+	// Agent ID filter: only the main agent should run extraction.
+	agentID string
+
 	// Turn counter for throttling (extract every N turns).
 	turnsSinceLastExtraction int
 	extractEveryNTurns       int
+
+	// Post-extraction callback.
+	appendSystemMessage AppendSystemMessageFn
 
 	logger *slog.Logger
 }
@@ -76,7 +107,49 @@ func NewExtractMemoriesService(
 		settings:           settings,
 		cfg:                cfg,
 		extractEveryNTurns: n,
+		drainCh:            make(chan struct{}),
 		logger:             slog.Default(),
+	}
+}
+
+// SetAgentID sets the agent ID. Only the main agent (empty or matching
+// the service's ID) is allowed to run extraction.
+func (s *ExtractMemoriesService) SetAgentID(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentID = id
+}
+
+// SetAppendSystemMessage sets the post-extraction notification callback.
+func (s *ExtractMemoriesService) SetAppendSystemMessage(fn AppendSystemMessageFn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendSystemMessage = fn
+}
+
+// DrainPending triggers any queued trailing extraction and blocks
+// until it finishes or the timeout elapses. Returns true if drained.
+func (s *ExtractMemoriesService) DrainPending(timeout time.Duration) bool {
+	// Signal drain.
+	select {
+	case <-s.drainCh:
+	default:
+		close(s.drainCh)
+	}
+
+	// Wait for in-progress extraction to complete.
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		ip := s.inProgress
+		s.mu.Unlock()
+		if !ip {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -101,10 +174,20 @@ func (s *ExtractMemoriesService) OnTurnEnd(messages []agents.Message) {
 	}
 	s.logger.Info("memory: OnTurnEnd fired", "msg_count", len(messages))
 
+	// Agent ID filter: skip if this is a sub-agent.
 	s.mu.Lock()
-	if s.inProgress {
+	if s.agentID != "" {
 		s.mu.Unlock()
-		s.logger.Debug("memory: extraction skipped — already in progress")
+		s.logger.Debug("memory: extraction skipped — non-main agent", "agent_id", s.agentID)
+		return
+	}
+	if s.inProgress {
+		// Queue as trailing run instead of discarding.
+		msgCopy := make([]agents.Message, len(messages))
+		copy(msgCopy, messages)
+		s.pendingCtx = &ExtractionContext{Messages: msgCopy}
+		s.mu.Unlock()
+		s.logger.Debug("memory: extraction queued as trailing run")
 		return
 	}
 	s.turnsSinceLastExtraction++
@@ -120,31 +203,57 @@ func (s *ExtractMemoriesService) OnTurnEnd(messages []agents.Message) {
 	msgCopy := make([]agents.Message, len(messages))
 	copy(msgCopy, messages)
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				s.logger.Error("memory: extraction panicked", "recover", r)
-			}
-			s.mu.Lock()
-			s.inProgress = false
-			s.turnsSinceLastExtraction = 0
-			s.mu.Unlock()
-		}()
+	go s.runLoop(msgCopy)
+}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		if err := s.runExtraction(ctx, msgCopy); err != nil {
-			s.logger.Warn("memory: extraction failed", "err", err)
+// runLoop runs the extraction and then drains any pending trailing context.
+func (s *ExtractMemoriesService) runLoop(messages []agents.Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("memory: extraction panicked", "recover", r)
 		}
+		s.mu.Lock()
+		s.inProgress = false
+		s.turnsSinceLastExtraction = 0
+		s.mu.Unlock()
 	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	result, err := s.runExtraction(ctx, messages)
+	if err != nil {
+		s.logger.Warn("memory: extraction failed", "err", err)
+	} else if result != nil && result.FilesWritten > 0 {
+		s.mu.Lock()
+		cb := s.appendSystemMessage
+		s.mu.Unlock()
+		if cb != nil {
+			cb(fmt.Sprintf("Saved %d memories", result.FilesWritten))
+		}
+	}
+
+	// Check for trailing run.
+	s.mu.Lock()
+	pending := s.pendingCtx
+	s.pendingCtx = nil
+	s.mu.Unlock()
+
+	if pending != nil {
+		s.logger.Info("memory: running trailing extraction")
+		ctx2, cancel2 := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel2()
+		if _, trailErr := s.runExtraction(ctx2, pending.Messages); trailErr != nil {
+			s.logger.Warn("memory: trailing extraction failed", "err", trailErr)
+		}
+	}
 }
 
 // runExtraction performs the actual extraction.
-func (s *ExtractMemoriesService) runExtraction(ctx context.Context, messages []agents.Message) error {
+func (s *ExtractMemoriesService) runExtraction(ctx context.Context, messages []agents.Message) (*ExtractionResult, error) {
 	memoryDir := GetAutoMemPath(s.cwd, s.settings)
 	if memoryDir == "" {
-		return fmt.Errorf("cannot resolve auto-memory path for cwd=%q", s.cwd)
+		return nil, fmt.Errorf("cannot resolve auto-memory path for cwd=%q", s.cwd)
 	}
 
 	// Count new model-visible messages since last extraction
@@ -152,7 +261,7 @@ func (s *ExtractMemoriesService) runExtraction(ctx context.Context, messages []a
 	if newMessageCount < 2 {
 		s.logger.Info("memory: extraction skipped — not enough new messages",
 			"new_count", newMessageCount, "cursor", s.lastMessageUUID, "total_msgs", len(messages))
-		return nil
+		return &ExtractionResult{}, nil
 	}
 	s.logger.Info("memory: extraction starting", "new_messages", newMessageCount)
 
@@ -162,7 +271,7 @@ func (s *ExtractMemoriesService) runExtraction(ctx context.Context, messages []a
 		if last := lastMessageUUID(messages); last != "" {
 			s.lastMessageUUID = last
 		}
-		return nil
+		return &ExtractionResult{}, nil
 	}
 
 	// Scan existing memory files for the manifest
@@ -215,15 +324,15 @@ func (s *ExtractMemoriesService) runExtraction(ctx context.Context, messages []a
 		"summary_len", len(conversationSummary), "prompt_len", len(systemPrompt))
 	response, err := DefaultSideQueryFn(ctx, systemPrompt, conversationSummary)
 	if err != nil {
-		return fmt.Errorf("side query failed: %w", err)
+		return nil, fmt.Errorf("side query failed: %w", err)
 	}
 	s.logger.Info("memory: extraction LLM responded",
 		"response_len", len(response), "response_head", truncate(response, 300))
 
 	// Parse and write memories
-	written, err := s.parseAndWriteMemories(memoryDir, response, skipIndex)
+	result, err := s.parseAndWriteMemories(memoryDir, response, skipIndex)
 	if err != nil {
-		return fmt.Errorf("write memories: %w", err)
+		return nil, fmt.Errorf("write memories: %w", err)
 	}
 
 	// Advance cursor
@@ -231,18 +340,18 @@ func (s *ExtractMemoriesService) runExtraction(ctx context.Context, messages []a
 		s.lastMessageUUID = last
 	}
 
-	s.logger.Info("memory: extraction complete", "files_written", written)
-	return nil
+	s.logger.Info("memory: extraction complete", "files_written", result.FilesWritten)
+	return result, nil
 }
 
 // parseAndWriteMemories parses the LLM response and writes memory files.
-func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response string, skipIndex bool) (int, error) {
+func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response string, skipIndex bool) (*ExtractionResult, error) {
 	// Extract JSON from response (may be wrapped in ```json ... ```)
 	jsonStr := extractJSON(response)
 	if jsonStr == "" {
 		s.logger.Info("memory: extraction LLM returned no JSON",
 			"response_len", len(response), "response_head", truncate(response, 200))
-		return 0, nil
+		return &ExtractionResult{}, nil
 	}
 
 	// Simple JSON parsing without importing encoding/json to avoid
@@ -258,20 +367,21 @@ func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response strin
 		IndexEntries []string      `json:"index_entries"`
 	}
 
-	var result extractResult
-	if err := parseJSONResponse(jsonStr, &result); err != nil {
+	var parsed extractResult
+	if err := parseJSONResponse(jsonStr, &parsed); err != nil {
 		s.logger.Info("memory: could not parse extraction response", "err", err,
 			"json_head", truncate(jsonStr, 200))
-		return 0, nil // Graceful degradation
+		return &ExtractionResult{}, nil // Graceful degradation
 	}
 
-	if len(result.Memories) == 0 {
+	if len(parsed.Memories) == 0 {
 		s.logger.Info("memory: extraction parsed OK but memories array empty")
-		return 0, nil
+		return &ExtractionResult{}, nil
 	}
 
 	written := 0
-	for _, mem := range result.Memories {
+	var filePaths []string
+	for _, mem := range parsed.Memories {
 		if mem.Filename == "" || mem.Content == "" {
 			continue
 		}
@@ -307,10 +417,11 @@ func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response strin
 			continue
 		}
 		written++
+		filePaths = append(filePaths, fpath)
 	}
 
 	// Update MEMORY.md index (unless skipIndex)
-	if !skipIndex && len(result.IndexEntries) > 0 && written > 0 {
+	if !skipIndex && len(parsed.IndexEntries) > 0 && written > 0 {
 		entrypoint := filepath.Join(strings.TrimRight(memoryDir, string(os.PathSeparator)), autoMemEntrypoint)
 		existing, _ := os.ReadFile(entrypoint)
 		var b strings.Builder
@@ -320,7 +431,7 @@ func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response strin
 				b.WriteString("\n")
 			}
 		}
-		for _, entry := range result.IndexEntries {
+		for _, entry := range parsed.IndexEntries {
 			entry = strings.TrimSpace(entry)
 			if entry != "" {
 				// Avoid duplicates
@@ -334,7 +445,26 @@ func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response strin
 		}
 	}
 
-	return written, nil
+	return &ExtractionResult{FilesWritten: written, FilePaths: filePaths}, nil
+}
+
+// CreateAutoMemCanUseTool returns a CanUseToolFn that allows read-only
+// tools anywhere but restricts write tools to the memory directory.
+func CreateAutoMemCanUseTool(memoryDir string) CanUseToolFn {
+	cleanDir := strings.TrimRight(memoryDir, string(os.PathSeparator)) + string(os.PathSeparator)
+	return func(toolName, targetPath string) bool {
+		switch toolName {
+		case "Read", "Grep", "Glob", "LS", "Stat":
+			return true
+		case "Edit", "Write":
+			cleanPath := filepath.Clean(targetPath) + string(os.PathSeparator)
+			return strings.HasPrefix(cleanPath, cleanDir)
+		case "Bash":
+			return false // read-only bash not enforceable here
+		default:
+			return false
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -449,8 +579,12 @@ func buildConversationSummary(messages []agents.Message, sinceUUID string) strin
 }
 
 // extractJSON pulls a JSON object from a response that may be wrapped
-// in markdown code fences.
+// in markdown code fences or <think> blocks.
 func extractJSON(s string) string {
+	// Strip <think>...</think> blocks (reasoning models like DeepSeek).
+	s = stripThinkBlocks(s)
+	s = strings.TrimSpace(s)
+
 	// Try to find ```json ... ```
 	if idx := strings.Index(s, "```json"); idx >= 0 {
 		start := idx + len("```json")
@@ -465,13 +599,68 @@ func extractJSON(s string) string {
 			return strings.TrimSpace(s[start : start+end])
 		}
 	}
-	// Try raw JSON
+	// Try raw JSON with balanced-brace matching.
 	if idx := strings.Index(s, "{"); idx >= 0 {
-		if end := strings.LastIndex(s, "}"); end > idx {
+		if end := findMatchingBrace(s, idx); end > idx {
 			return s[idx : end+1]
 		}
 	}
 	return ""
+}
+
+// stripThinkBlocks removes <think>...</think> blocks from the string.
+// Handles both closed tags and unclosed trailing <think> blocks.
+func stripThinkBlocks(s string) string {
+	for {
+		start := strings.Index(s, "<think>")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start:], "</think>")
+		if end < 0 {
+			// Unclosed <think> — strip everything from <think> onward.
+			s = s[:start]
+			break
+		}
+		s = s[:start] + s[start+end+len("</think>"):]
+	}
+	return s
+}
+
+// findMatchingBrace finds the closing '}' that matches the opening '{'
+// at position start, respecting nesting and ignoring braces inside
+// JSON string literals.
+func findMatchingBrace(s string, start int) int {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if c == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if c == '{' {
+			depth++
+		} else if c == '}' {
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // parseJSONResponse unmarshals a JSON string into the target.

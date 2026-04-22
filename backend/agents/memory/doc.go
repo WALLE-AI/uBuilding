@@ -20,6 +20,27 @@
 //   - find_relevant.go : query-time recall via injectable LLM side-query (M12).
 //   - secret_scanner.go : gitleaks-based secret detection (M13).
 //   - write_allowlist.go : IsAutoMemWriteAllowed + CheckTeamMemSecrets (M13).
+//   - extract_memories.go : background memory extraction with trailing-run
+//     queue, drain, agentID filter, and CanUseTool (M14/M16 upgrade).
+//   - extract_prompts.go : extraction prompt builders (M14).
+//   - team_sync_types.go : team memory sync API payload types (M17).
+//   - team_sync.go : local push/fetch operations with secret scanning (M17).
+//   - team_sync_watcher.go : polling-based team memory change detection (M17).
+//
+// Session memory (separate package session_memory/):
+//   - config.go : SessionMemoryConfig with env-var gating (M15).
+//   - state.go : concurrency-safe SessionStateManager (M15).
+//   - prompts.go : template loading, substitution, truncation (M15).
+//   - extractor.go : extraction orchestration via SideQueryFn (M15).
+//   - compact_bridge.go : SM-compact wiring with compact primitives (M15).
+//   - paths.go : session-scoped path resolution (M15).
+//
+// Auto-dream (separate package autodream/):
+//   - autodream_config.go : configuration with env-var gating (M14).
+//   - consolidation_lock.go : filesystem lock for consolidation (M14).
+//   - consolidation_prompt.go : consolidation prompt builder (M14).
+//   - autodream.go : dream task orchestration (M14).
+//   - dream_task.go : background task wrapper (M14).
 //
 // Compatibility: every new capability is opt-in via `EngineConfig`
 // fields and `UBUILDING_*` environment variables and defaults to off so
