@@ -292,6 +292,21 @@ func TestExtractJSON_ThinkThenCodeFence(t *testing.T) {
 	assert.Equal(t, `{"memories":[{"filename":"test.md"}]}`, extractJSON(input))
 }
 
+func TestExtractJSON_JSONInsideThinkBlock(t *testing.T) {
+	// Model puts JSON inside the think block — fallback to original text.
+	input := `<think>分析完毕，返回结果：{"memories":[{"filename":"user.md","action":"create","frontmatter":{},"content":"test"}],"index_entries":[]}</think>`
+	result := extractJSON(input)
+	assert.Contains(t, result, `"memories"`)
+	assert.Contains(t, result, `"user.md"`)
+}
+
+func TestExtractJSON_ThinkWithNoCloseAndJSONInside(t *testing.T) {
+	// Unclosed think with JSON inside the reasoning.
+	input := `<think>分析：{"memories":[],"index_entries":[]}`
+	result := extractJSON(input)
+	assert.Equal(t, `{"memories":[],"index_entries":[]}`, result)
+}
+
 // ---------------------------------------------------------------------------
 // T7 · countModelVisibleMessagesSince
 // ---------------------------------------------------------------------------

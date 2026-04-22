@@ -349,8 +349,14 @@ func (s *ExtractMemoriesService) parseAndWriteMemories(memoryDir, response strin
 	// Extract JSON from response (may be wrapped in ```json ... ```)
 	jsonStr := extractJSON(response)
 	if jsonStr == "" {
+		tail := response
+		if len(tail) > 300 {
+			tail = tail[len(tail)-300:]
+		}
 		s.logger.Info("memory: extraction LLM returned no JSON",
-			"response_len", len(response), "response_head", truncate(response, 200))
+			"response_len", len(response),
+			"response_head", truncate(response, 200),
+			"response_tail", tail)
 		return &ExtractionResult{}, nil
 	}
 
@@ -582,9 +588,25 @@ func buildConversationSummary(messages []agents.Message, sinceUUID string) strin
 // in markdown code fences or <think> blocks.
 func extractJSON(s string) string {
 	// Strip <think>...</think> blocks (reasoning models like DeepSeek).
-	s = stripThinkBlocks(s)
-	s = strings.TrimSpace(s)
+	stripped := strings.TrimSpace(stripThinkBlocks(s))
 
+	// Try the stripped version first, fall back to original if empty.
+	// This handles: (a) JSON after </think>, (b) JSON inside <think>.
+	candidates := []string{stripped}
+	if stripped != strings.TrimSpace(s) {
+		candidates = append(candidates, strings.TrimSpace(s))
+	}
+
+	for _, candidate := range candidates {
+		if r := tryExtractJSONFrom(candidate); r != "" {
+			return r
+		}
+	}
+	return ""
+}
+
+// tryExtractJSONFrom attempts JSON extraction from a single string.
+func tryExtractJSONFrom(s string) string {
 	// Try to find ```json ... ```
 	if idx := strings.Index(s, "```json"); idx >= 0 {
 		start := idx + len("```json")
