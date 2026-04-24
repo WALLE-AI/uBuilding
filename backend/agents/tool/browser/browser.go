@@ -396,7 +396,7 @@ func (t *BrowserTool) dispatch(ctx context.Context, in *Input) string {
 	case ActionClearStorage:
 		return t.doClearStorage(in)
 	case ActionCDPSend:
-		return t.doCDPSend(in)
+		return t.doCDPSend(ctx, in)
 	case ActionClearCookies:
 		return t.doClearCookies(in)
 	case ActionSetGeolocation:

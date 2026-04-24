@@ -15,6 +15,7 @@ const (
 	ProviderOllama       ProviderType = "ollama"
 	ProviderVLLM         ProviderType = "vllm"
 	ProviderOpenAICompat ProviderType = "openai_compat"
+	ProviderDeepSeek     ProviderType = "deepseek"
 )
 
 // FactoryConfig holds configuration for the provider factory.
@@ -67,6 +68,13 @@ func NewProvider(cfg FactoryConfig) (Provider, error) {
 			Logger:  cfg.Logger,
 		}), nil
 
+	case ProviderDeepSeek:
+		return NewDeepSeekProvider(DeepSeekConfig{
+			APIKey:  cfg.APIKey,
+			BaseURL: cfg.BaseURL,
+			Logger:  cfg.Logger,
+		}), nil
+
 	default:
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.Type)
 	}
@@ -80,6 +88,8 @@ func DetectProviderType(model string) ProviderType {
 		return ProviderAnthropic
 	case strings.HasPrefix(lower, "gpt"):
 		return ProviderOpenAI
+	case strings.HasPrefix(lower, "deepseek"):
+		return ProviderDeepSeek
 	case strings.Contains(lower, "ollama"):
 		return ProviderOllama
 	default:

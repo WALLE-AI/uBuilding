@@ -1,6 +1,7 @@
 package browser
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -10,7 +11,7 @@ import (
 	"github.com/ysmood/gson"
 )
 
-func (t *BrowserTool) doCDPSend(in *Input) string {
+func (t *BrowserTool) doCDPSend(ctx context.Context, in *Input) string {
 	_, page, err := t.getSessionAndPage(in)
 	if err != nil {
 		return errStr(err)
@@ -20,7 +21,7 @@ func (t *BrowserTool) doCDPSend(in *Input) string {
 	}
 
 	params, _ := json.Marshal(in.CDPParams)
-	res, err := page.Call(nil, "", in.CDPMethod, params)
+	res, err := page.Call(ctx, "", in.CDPMethod, params)
 	if err != nil {
 		return fmt.Sprintf("cdp_send %s failed: %v", in.CDPMethod, err)
 	}
