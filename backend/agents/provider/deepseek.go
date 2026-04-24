@@ -155,9 +155,7 @@ func (p *DeepSeekProvider) buildRequest(params CallModelParams) (deepSeekChatReq
 	}
 
 	for _, msg := range params.Messages {
-		if dsMsg := convertMessageToDeepSeek(msg); dsMsg.Role != "" {
-			messages = append(messages, dsMsg)
-		}
+		messages = append(messages, convertMessageToDeepSeek(msg)...)
 	}
 
 	model := params.Model
@@ -357,7 +355,11 @@ func (p *DeepSeekProvider) streamResponse(ctx context.Context, req deepSeekChatR
 // Message conversion
 // ---------------------------------------------------------------------------
 
-func convertMessageToDeepSeek(msg agents.Message) deepSeekMessage {
+// convertMessageToDeepSeek converts one internal Message into one or more deepSeekMessages.
+// A single user message may contain multiple ContentBlockToolResult blocks; each becomes
+// a separate role="tool" message so DeepSeek always sees tool results immediately after
+// the assistant turn that produced the matching tool_calls.
+func convertMessageToDeepSeek(msg agents.Message) []deepSeekMessage {
 	switch msg.Type {
 	case agents.MessageTypeAssistant:
 		text := ""
@@ -380,33 +382,39 @@ func convertMessageToDeepSeek(msg agents.Message) deepSeekMessage {
 				})
 			}
 		}
-		return deepSeekMessage{
+		return []deepSeekMessage{{
 			Role:             "assistant",
 			Content:          text,
 			ReasoningContent: thinking,
 			ToolCalls:        toolCalls,
-		}
+		}}
 
 	case agents.MessageTypeUser:
+		// Collect all tool results first — each becomes its own role="tool" message.
+		var out []deepSeekMessage
 		for _, b := range msg.Content {
 			if b.Type == agents.ContentBlockToolResult {
 				contentStr, _ := b.Content.(string)
-				return deepSeekMessage{
+				out = append(out, deepSeekMessage{
 					Role:       "tool",
 					Content:    contentStr,
 					ToolCallID: b.ToolUseID,
-				}
+				})
 			}
 		}
+		if len(out) > 0 {
+			return out
+		}
+		// Regular user text message.
 		text := ""
 		for _, b := range msg.Content {
 			if b.Type == agents.ContentBlockText {
 				text += b.Text
 			}
 		}
-		return deepSeekMessage{Role: "user", Content: text}
+		return []deepSeekMessage{{Role: "user", Content: text}}
 
 	default:
-		return deepSeekMessage{}
+		return nil
 	}
 }
